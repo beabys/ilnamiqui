@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="none" stroke="url(#g1)" stroke-width="3"/>
+
+  <!-- Database cylinder body -->
+  <ellipse cx="64" cy="52" rx="28" ry="10" fill="url(#g2)" opacity="0.9"/>
+  <path d="M36 52 L36 80 C36 86, 48 90, 64 90 C80 90, 92 86, 92 80 L92 52" fill="url(#g2)" opacity="0.7"/>
+  <ellipse cx="64" cy="80" rx="28" ry="10" fill="url(#g2)" opacity="0.5"/>
+  <ellipse cx="64" cy="52" rx="28" ry="10" fill="url(#g2)" opacity="0.3"/>
+
+  <!-- Middle tier of database -->
+  <path d="M36 66 C36 72, 48 76, 64 76 C80 76, 92 72, 92 66" fill="none" stroke="#c4b5fd" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Circular recall arrow -->
+  <path d="M94 40 C100 30, 100 16, 88 8 C76 0, 60 2, 52 12"
+        fill="none" stroke="url(#g1)" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="48,16 56,8 54,20" fill="url(#g1)"/>
+
+  <!-- Small data dots inside cylinder -->
+  <circle cx="56" cy="60" r="2.5" fill="#e0e7ff"/>
+  <circle cx="64" cy="56" r="2.5" fill="#e0e7ff"/>
+  <circle cx="72" cy="60" r="2.5" fill="#e0e7ff"/>
+  <circle cx="60" cy="72" r="2.5" fill="#e0e7ff"/>
+  <circle cx="68" cy="68" r="2.5" fill="#e0e7ff"/>
+  <circle cx="64" cy="84" r="2.5" fill="#e0e7ff"/>
+</svg>
