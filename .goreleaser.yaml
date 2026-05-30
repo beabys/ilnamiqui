@@ -1,0 +1,41 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/ilnamiqui
+    binary: ilnamiqui
+    ldflags:
+      - -X github.com/beabys/ilnamiqui/internal/cli.version={{.Version}}
+      - -X github.com/beabys/ilnamiqui/internal/cli.commit={{.Commit}}
+      - -X github.com/beabys/ilnamiqui/internal/cli.date={{.Date}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - name_template: "{{.Binary}}-{{.Os}}-{{.Arch}}"
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+
+release:
+  github:
+    owner: beabys
+    name: ilnamiqui
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
