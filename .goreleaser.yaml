@@ -24,10 +24,12 @@ builds:
 
 archives:
   - name_template: "{{.Binary}}-{{.Os}}-{{.Arch}}"
-    format: tar.gz
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 release:
   github:
@@ -37,5 +39,4 @@ release:
 checksum:
   name_template: "checksums.txt"
 
-snapshot:
-  name_template: "{{ .Tag }}-next"
+# snapshot uses default version template ({{.Tag}}-SNAPSHOT-{{.ShortCommit}})
