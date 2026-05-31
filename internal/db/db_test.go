@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,9 +78,96 @@ func TestDoubleClose(t *testing.T) {
 }
 
 func TestNewDB_InvalidPath(t *testing.T) {
-	// Try opening in a non-existent directory
 	_, err := NewDB("/nonexistent/path/db.db")
 	if err == nil {
 		t.Fatal("expected error for invalid path")
+	}
+}
+
+func TestOpen_DirPath(t *testing.T) {
+	// Using a directory path causes the first PRAGMA Exec to fail
+	d := &DB{}
+	err := d.Open(t.TempDir())
+	if err == nil {
+		t.Fatal("expected error opening directory as db path")
+	}
+}
+
+func TestClose_NilDB(t *testing.T) {
+	d := &DB{}
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close on zero DB: %v", err)
+	}
+}
+
+func TestSQLDB_NilOnUnopened(t *testing.T) {
+	d := &DB{}
+	if db := d.SQLDB(); db != nil {
+		t.Fatal("SQLDB on unopened DB should return nil")
+	}
+}
+
+func TestSQLDB_AfterClose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sql_after_close.db")
+	d, err := NewDB(path)
+	if err != nil {
+		t.Fatalf("NewDB error: %v", err)
+	}
+	_ = d.Close()
+	if db := d.SQLDB(); db == nil {
+		t.Fatal("SQLDB after Close should still return non-nil *sql.DB")
+	}
+}
+
+func TestRunMigrations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "migrate.db")
+	d, err := NewDB(path)
+	if err != nil {
+		t.Fatalf("NewDB error: %v", err)
+	}
+	defer d.Close()
+
+	if err := RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("RunMigrations error: %v", err)
+	}
+
+	var count int
+	row := d.SQLDB().QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions', 'memory_entries')")
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("scan table count: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 tables, got %d", count)
+	}
+
+	// idempotent
+	if err := RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("second RunMigrations should succeed: %v", err)
+	}
+}
+
+func TestRunMigrations_ClosedDB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "closed_migrate.db")
+	d, err := NewDB(path)
+	if err != nil {
+		t.Fatalf("NewDB error: %v", err)
+	}
+	d.Close()
+
+	if err := RunMigrations(d.SQLDB()); err == nil {
+		t.Fatal("expected error running migrations on closed DB")
+	}
+}
+
+func TestRunMigrations_InvalidConn(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open error: %v", err)
+	}
+	db.Close()
+
+	err = RunMigrations(db)
+	if err == nil {
+		t.Fatal("expected error with closed *sql.DB connection")
 	}
 }

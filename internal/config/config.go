@@ -7,6 +7,11 @@ import (
 	"path/filepath"
 )
 
+const (
+	OPENCODE_DIR = ".opencode"
+	ILNAMIQUI_DB = "ilnamiqui.db"
+)
+
 // FindProjectRoot walks up from CWD looking for a .opencode/ directory.
 // Returns the absolute path containing .opencode/, or an error if not found.
 func FindProjectRoot() (string, error) {
@@ -21,14 +26,15 @@ func FindProjectRoot() (string, error) {
 	}
 
 	for {
-		info, err := os.Stat(filepath.Join(dir, ".opencode"))
+		info, err := os.Stat(filepath.Join(dir, OPENCODE_DIR))
 		if err == nil && info.IsDir() {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			return "", fmt.Errorf(
-				"no .opencode directory found from %s to root: not in an opencode project",
+				"no %s directory found from %s to root: not in an opencode project",
+				OPENCODE_DIR,
 				dir,
 			)
 		}
@@ -42,7 +48,7 @@ func DBPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, ".opencode", "ilnamiqui.db"), nil
+	return filepath.Join(root, OPENCODE_DIR, ILNAMIQUI_DB), nil
 }
 
 // ProjectSlug returns a short hex hash identifying the project root.

@@ -16,6 +16,18 @@ import (
 	"github.com/beabys/ilnamiqui/internal/session"
 )
 
+const (
+	INIT    = "init"
+	SAVE    = "save"
+	LOAD    = "load"
+	LIST    = "list"
+	SEARCH  = "search"
+	DELETE  = "delete"
+	SESSION = "session"
+	VERSION = "version"
+	HELP    = "help"
+)
+
 var version = "dev"
 
 // Run is the main CLI entry point. It parses args and dispatches to subcommands.
@@ -28,31 +40,30 @@ func Run(args []string) error {
 	cmdArgs := args[1:]
 
 	switch cmd {
-	case "init":
+	case INIT:
 		return cmdInit(cmdArgs)
-	case "save":
+	case SAVE:
 		return cmdSave(cmdArgs)
-	case "load":
+	case LOAD:
 		return cmdLoad(cmdArgs)
-	case "list":
+	case LIST:
 		return cmdList(cmdArgs)
-	case "search":
+	case SEARCH:
 		return cmdSearch(cmdArgs)
-	case "delete":
+	case DELETE:
 		return cmdDelete(cmdArgs)
-	case "session":
+	case SESSION:
 		return cmdSession(cmdArgs)
-	case "version":
+	case VERSION:
 		return cmdVersion()
-	case "help", "--help", "-h":
+	case HELP, "--help", "-h":
 		return printHelp()
 	default:
 		return fmt.Errorf("unknown command %q — run 'ilnamiqui help' for usage", cmd)
 	}
 }
 
-// ─── init ────────────────────────────────────────────────────────────────
-
+// cmdInit initializes the database in .opencode/ilnamiqui.db, creating the directory if needed.
 func cmdInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -87,8 +98,7 @@ func cmdInit(args []string) error {
 	return nil
 }
 
-// ─── save ────────────────────────────────────────────────────────────────
-
+// cmdSave saves a memory entry for the active session.
 func cmdSave(args []string) error {
 	fs := flag.NewFlagSet("save", flag.ContinueOnError)
 	pretty := fs.Bool("pretty", false, "human-readable output")
@@ -134,8 +144,7 @@ func cmdSave(args []string) error {
 	return nil
 }
 
-// ─── load ────────────────────────────────────────────────────────────────
-
+// cmdLoad loads and prints memory entries, either for the active session or all sessions.
 func cmdLoad(args []string) error {
 	fs := flag.NewFlagSet("load", flag.ContinueOnError)
 	sessionFlag := fs.Bool("session", false, "load entries for active session only")
@@ -180,8 +189,7 @@ func cmdLoad(args []string) error {
 	return printJSON(entries)
 }
 
-// ─── list ────────────────────────────────────────────────────────────────
-
+// cmdList lists recent sessions for the project.
 func cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	limit := fs.Int("limit", 10, "number of sessions to list")
@@ -209,8 +217,7 @@ func cmdList(args []string) error {
 	return printJSON(sessions)
 }
 
-// ─── search ──────────────────────────────────────────────────────────────
-
+// cmdSearch searches memory entries by key or value.
 func cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	pretty := fs.Bool("pretty", false, "human-readable output")
@@ -244,8 +251,7 @@ func cmdSearch(args []string) error {
 	return printJSON(entries)
 }
 
-// ─── delete ──────────────────────────────────────────────────────────────
-
+// cmdDelete deletes a memory entry by ID.
 func cmdDelete(args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -277,8 +283,7 @@ func cmdDelete(args []string) error {
 	return nil
 }
 
-// ─── session ─────────────────────────────────────────────────────────────
-
+// cmdSession handles session subcommands like "start" and "end".
 func cmdSession(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: ilnamiqui session <start|end>")
@@ -297,6 +302,7 @@ func cmdSession(args []string) error {
 	}
 }
 
+// cmdSessionStart starts a new session for the project and prints the session ID.
 func cmdSessionStart(args []string) error {
 	fs := flag.NewFlagSet("session start", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -348,15 +354,13 @@ func cmdSessionEnd(args []string) error {
 	return nil
 }
 
-// ─── version ─────────────────────────────────────────────────────────────
-
+// cmdVersion prints the CLI version.
 func cmdVersion() error {
 	fmt.Println(version)
 	return nil
 }
 
-// ─── help ────────────────────────────────────────────────────────────────
-
+// printHelp prints usage information for the CLI.
 func printHelp() error {
 	const help = `ilnamiqui — session memory for opencode (Nahuatl: "to remember")
 
@@ -386,8 +390,6 @@ Use "ilnamiqui help <command>" for more details on a specific command.
 	fmt.Print(help)
 	return nil
 }
-
-// ─── helpers ─────────────────────────────────────────────────────────────
 
 // openDB finds the project root, opens the DB, and verifies migrations.
 func openDB() (*db.DB, string, error) {
