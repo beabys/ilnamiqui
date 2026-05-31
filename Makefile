@@ -4,7 +4,7 @@ BINARY=ilnamiqui
 VERSION?=dev
 
 build:
-	go build -ldflags="-X github.com/beabys/ilnamiqui/internal/cli.version=$(VERSION)" -o $(BINARY) ./cmd/ilnamiqui/
+	go build -ldflags="-X github.com/beabys/ilnamiqui/internal/cli.version=$(VERSION)" -o $(BINARY) ./cmd/cli/
 
 test:
 	go test ./... -count=1

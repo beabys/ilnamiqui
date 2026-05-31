@@ -70,7 +70,8 @@ Keep values terse (one sentence). Same key appends.
 
 ```bash
 ilnamiqui list --limit 5 --pretty     # recent sessions
-ilnamiqui search "<query>" --pretty   # search memories
+ilnamiqui search "<query>" --pretty               # search memories
+ilnamiqui search "<query>" --after 2026-01-01     # search by date range
 ilnamiqui load --pretty               # refresh all context
 ```
 

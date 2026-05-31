@@ -131,3 +131,73 @@ func TestIntegrationFileBasedWAL(t *testing.T) {
 	}
 	t.Logf("journal_mode: %s", journalMode)
 }
+
+func TestIntegrationSearchEntries_WithDateRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	db := fileDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+	// Use the stub session inserted by fileDB
+	sessionID := "test-session"
+
+	// Insert entries with explicit dates
+	entries := []struct {
+		key, value, createdAt string
+	}{
+		{"old", "old entry", "2025-01-01T00:00:00Z"},
+		{"mid", "mid entry", "2026-01-01T00:00:00Z"},
+		{"new", "new entry", "2027-01-01T00:00:00Z"},
+	}
+
+	for _, e := range entries {
+		query := `INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`
+		_, err := store.db.ExecContext(ctx, query, sessionID, e.key, e.value, e.createdAt)
+		if err != nil {
+			t.Fatalf("insert %s: %v", e.key, err)
+		}
+	}
+
+	after := parseTime(t, "2026-01-01T00:00:00Z")
+	before := parseTime(t, "2027-06-01T00:00:00Z")
+
+	// Only date range, no query
+	results, err := store.SearchEntries(ctx, "", 0, &after, &before)
+	if err != nil {
+		t.Fatalf("SearchEntries date range: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 entries in date range, got %d: %+v", len(results), results)
+	}
+
+	// Query + date range combined
+	results, err = store.SearchEntries(ctx, "mid", 0, &after, &before)
+	if err != nil {
+		t.Fatalf("SearchEntries query+date: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 entry for 'mid' in range, got %d", len(results))
+	}
+
+	// Only after, no before
+	results, err = store.SearchEntries(ctx, "", 0, &after, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries after only: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 entries after 2026, got %d", len(results))
+	}
+
+	// Before only, no after
+	results, err = store.SearchEntries(ctx, "", 0, nil, &before)
+	if err != nil {
+		t.Fatalf("SearchEntries before only: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 entries before 2027-06, got %d", len(results))
+	}
+}
+
+

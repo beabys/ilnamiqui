@@ -1,0 +1,16 @@
+all: true
+structname: '{{.InterfaceName}}'
+template: testify
+packages:
+  github.com/beabys/ilnamiqui/internal/service:
+    config:
+      dir: internal/mocks/
+      filename: "{{.InterfaceName}}.go"
+  github.com/beabys/ilnamiqui/internal/cli:
+    config:
+      dir: internal/mocks/
+      filename: "{{.InterfaceName}}.go"
+  github.com/beabys/ilnamiqui/internal/mcp:
+    config:
+      dir: internal/mocks/
+      filename: "{{.InterfaceName}}.go"

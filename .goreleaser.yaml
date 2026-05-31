@@ -5,7 +5,7 @@ before:
     - go mod tidy
 
 builds:
-  - main: ./cmd/ilnamiqui
+  - main: ./cmd/cli
     binary: ilnamiqui
     ldflags:
       - -X github.com/beabys/ilnamiqui/internal/cli.version={{.Version}}
@@ -22,8 +22,25 @@ builds:
       - goos: windows
         goarch: arm64
 
+  - main: ./cmd/mcp
+    binary: ilnamiqui-mcp
+    ldflags:
+      - -X github.com/beabys/ilnamiqui/internal/cli.version={{.Version}}
+      - -X github.com/beabys/ilnamiqui/internal/cli.commit={{.Commit}}
+      - -X github.com/beabys/ilnamiqui/internal/cli.date={{.Date}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
 archives:
-  - name_template: "{{.Binary}}-{{.Os}}-{{.Arch}}"
+  - name_template: "{{.ProjectName}}-{{.Os}}-{{.Arch}}"
     formats:
       - tar.gz
     format_overrides:

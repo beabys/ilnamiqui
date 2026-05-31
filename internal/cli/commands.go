@@ -10,10 +10,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/beabys/ilnamiqui/internal/config"
-	"github.com/beabys/ilnamiqui/internal/db"
 	"github.com/beabys/ilnamiqui/internal/memory"
-	"github.com/beabys/ilnamiqui/internal/session"
+	"github.com/beabys/ilnamiqui/internal/service"
 )
 
 const (
@@ -30,8 +28,18 @@ const (
 
 var version = "dev"
 
+// CLI handles command-line parsing and output formatting.
+type CLI struct {
+	svc service.Service
+}
+
+// New creates a CLI with the given service.
+func New(svc service.Service) *CLI {
+	return &CLI{svc: svc}
+}
+
 // Run is the main CLI entry point. It parses args and dispatches to subcommands.
-func Run(args []string) error {
+func (c *CLI) Run(args []string) error {
 	if len(args) == 0 {
 		return printHelp()
 	}
@@ -41,19 +49,19 @@ func Run(args []string) error {
 
 	switch cmd {
 	case INIT:
-		return cmdInit(cmdArgs)
+		return c.cmdInit(cmdArgs)
 	case SAVE:
-		return cmdSave(cmdArgs)
+		return c.cmdSave(cmdArgs)
 	case LOAD:
-		return cmdLoad(cmdArgs)
+		return c.cmdLoad(cmdArgs)
 	case LIST:
-		return cmdList(cmdArgs)
+		return c.cmdList(cmdArgs)
 	case SEARCH:
-		return cmdSearch(cmdArgs)
+		return c.cmdSearch(cmdArgs)
 	case DELETE:
-		return cmdDelete(cmdArgs)
+		return c.cmdDelete(cmdArgs)
 	case SESSION:
-		return cmdSession(cmdArgs)
+		return c.cmdSession(cmdArgs)
 	case VERSION:
 		return cmdVersion()
 	case HELP, "--help", "-h":
@@ -63,89 +71,52 @@ func Run(args []string) error {
 	}
 }
 
-// cmdInit initializes the database in .opencode/ilnamiqui.db, creating the directory if needed.
-func cmdInit(args []string) error {
+// cmdInit initializes the database.
+func (c *CLI) cmdInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	root, err := config.FindProjectRoot()
+	resp, err := c.svc.Init(context.Background(), &service.InitRequest{})
 	if err != nil {
-		// Create .opencode directory
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("getwd: %w", err)
-		}
-		root = cwd
-		if err := os.MkdirAll(root+"/.opencode", 0o755); err != nil {
-			return fmt.Errorf("create .opencode: %w", err)
-		}
+		return err
 	}
-
-	dbPath := root + "/.opencode/ilnamiqui.db"
-	database, err := db.NewDB(dbPath)
-	if err != nil {
-		return fmt.Errorf("open db: %w", err)
-	}
-	defer database.Close()
-
-	if err := db.RunMigrations(database.SQLDB()); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
-
-	fmt.Printf("ilnamiqui initialized at %s\n", dbPath)
+	fmt.Printf("ilnamiqui initialized at %s\n", resp.DBPath)
 	return nil
 }
 
-// cmdSave saves a memory entry for the active session.
-func cmdSave(args []string) error {
+// cmdSave saves a memory entry.
+func (c *CLI) cmdSave(args []string) error {
 	fs := flag.NewFlagSet("save", flag.ContinueOnError)
 	pretty := fs.Bool("pretty", false, "human-readable output")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
 	if fs.NArg() < 2 {
 		return fmt.Errorf("usage: ilnamiqui save <key> <value>")
 	}
-
 	key := fs.Arg(0)
 	value := strings.Join(fs.Args()[1:], " ")
 
-	database, projectSlug, err := openDB()
+	resp, err := c.svc.Save(context.Background(), &service.SaveRequest{Key: key, Value: value})
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-
-	ctx := context.Background()
-	mgr := session.NewManager(database.SQLDB())
-	sess, err := mgr.GetActiveSession(ctx, projectSlug)
-	if err != nil {
-		return fmt.Errorf("get active session: %w", err)
-	}
-
-	store := memory.NewStore(database.SQLDB())
-	entry, err := store.SaveEntry(ctx, sess.ID, key, value)
-	if err != nil {
-		return fmt.Errorf("save entry: %w", err)
-	}
 
 	if *pretty {
-		fmt.Printf("ID        %d\n", entry.ID)
-		fmt.Printf("Key       %s\n", entry.Key)
-		fmt.Printf("Value     %s\n", entry.Value)
-		fmt.Printf("Session   %s\n", entry.SessionID)
-		fmt.Printf("Created   %s\n", entry.CreatedAt.Format(time.RFC3339))
+		fmt.Printf("ID        %d\n", resp.Entry.ID)
+		fmt.Printf("Key       %s\n", resp.Entry.Key)
+		fmt.Printf("Value     %s\n", resp.Entry.Value)
+		fmt.Printf("Session   %s\n", resp.Entry.SessionID)
+		fmt.Printf("Created   %s\n", resp.Entry.CreatedAt.Format(time.RFC3339))
 	} else {
-		return printJSON(entry)
+		return printJSON(resp.Entry)
 	}
 	return nil
 }
 
-// cmdLoad loads and prints memory entries, either for the active session or all sessions.
-func cmdLoad(args []string) error {
+// cmdLoad loads memory entries.
+func (c *CLI) cmdLoad(args []string) error {
 	fs := flag.NewFlagSet("load", flag.ContinueOnError)
 	sessionFlag := fs.Bool("session", false, "load entries for active session only")
 	pretty := fs.Bool("pretty", false, "human-readable output")
@@ -154,43 +125,22 @@ func cmdLoad(args []string) error {
 		return err
 	}
 
-	database, projectSlug, err := openDB()
+	resp, err := c.svc.Load(context.Background(), &service.LoadRequest{
+		Limit:       *limit,
+		SessionOnly: *sessionFlag,
+	})
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-
-	ctx := context.Background()
-	store := memory.NewStore(database.SQLDB())
-
-	var entries []memory.MemoryEntry
-
-	if *sessionFlag {
-		mgr := session.NewManager(database.SQLDB())
-		sess, err := mgr.GetActiveSession(ctx, projectSlug)
-		if err != nil {
-			return fmt.Errorf("get active session: %w", err)
-		}
-		entries, err = store.LoadEntries(ctx, sess.ID, *limit)
-		if err != nil {
-			return fmt.Errorf("load entries: %w", err)
-		}
-	} else {
-		var err error
-		entries, err = store.LoadAllEntries(ctx, *limit)
-		if err != nil {
-			return fmt.Errorf("load all entries: %w", err)
-		}
-	}
 
 	if *pretty {
-		return printEntriesTable(entries)
+		return printEntriesTable(resp.Entries)
 	}
-	return printJSON(entries)
+	return printJSON(resp.Entries)
 }
 
-// cmdList lists recent sessions for the project.
-func cmdList(args []string) error {
+// cmdList lists recent sessions.
+func (c *CLI) cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	limit := fs.Int("limit", 10, "number of sessions to list")
 	pretty := fs.Bool("pretty", false, "human-readable output")
@@ -198,159 +148,130 @@ func cmdList(args []string) error {
 		return err
 	}
 
-	database, projectSlug, err := openDB()
+	resp, err := c.svc.ListSessions(context.Background(), &service.ListSessionsRequest{Limit: *limit})
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-
-	ctx := context.Background()
-	mgr := session.NewManager(database.SQLDB())
-	sessions, err := mgr.ListSessions(ctx, projectSlug, *limit)
-	if err != nil {
-		return fmt.Errorf("list sessions: %w", err)
-	}
 
 	if *pretty {
-		return printSessionsTable(sessions)
+		return printSessionsTable(resp.Sessions)
 	}
-	return printJSON(sessions)
+	return printJSON(resp.Sessions)
 }
 
-// cmdSearch searches memory entries by key or value.
-func cmdSearch(args []string) error {
+// cmdSearch searches memory entries.
+func (c *CLI) cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	pretty := fs.Bool("pretty", false, "human-readable output")
 	limit := fs.Int("limit", 0, "maximum number of entries to return (0 = no limit)")
+	after := fs.String("after", "", "only entries after this date (RFC3339 or YYYY-MM-DD)")
+	before := fs.String("before", "", "only entries before this date (RFC3339 or YYYY-MM-DD)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: ilnamiqui search <query>")
+	query := strings.Join(fs.Args(), " ")
+
+	// Require at least a query, --after, or --before
+	if query == "" && *after == "" && *before == "" {
+		return fmt.Errorf("usage: ilnamiqui search <query> [--after DATE] [--before DATE] [--limit N]")
 	}
 
-	query := fs.Arg(0)
+	var afterTime, beforeTime *time.Time
+	if *after != "" {
+		t, err := parseDate(*after)
+		if err != nil {
+			return fmt.Errorf("invalid --after: %w", err)
+		}
+		afterTime = &t
+	}
+	if *before != "" {
+		t, err := parseDate(*before)
+		if err != nil {
+			return fmt.Errorf("invalid --before: %w", err)
+		}
+		beforeTime = &t
+	}
 
-	database, _, err := openDB()
+	resp, err := c.svc.Search(context.Background(), &service.SearchRequest{
+		Query:  query,
+		Limit:  *limit,
+		After:  afterTime,
+		Before: beforeTime,
+	})
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-
-	ctx := context.Background()
-	store := memory.NewStore(database.SQLDB())
-	entries, err := store.SearchEntries(ctx, query, *limit)
-	if err != nil {
-		return fmt.Errorf("search entries: %w", err)
-	}
 
 	if *pretty {
-		return printEntriesTable(entries)
+		return printEntriesTable(resp.Entries)
 	}
-	return printJSON(entries)
+	return printJSON(resp.Entries)
 }
 
-// cmdDelete deletes a memory entry by ID.
-func cmdDelete(args []string) error {
+// cmdDelete deletes a memory entry.
+func (c *CLI) cmdDelete(args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
 	if fs.NArg() < 1 {
 		return fmt.Errorf("usage: ilnamiqui delete <id>")
 	}
-
 	var id int64
 	if _, err := fmt.Sscanf(fs.Arg(0), "%d", &id); err != nil {
 		return fmt.Errorf("invalid id %q: %w", fs.Arg(0), err)
 	}
 
-	database, _, err := openDB()
+	_, err := c.svc.Delete(context.Background(), &service.DeleteRequest{ID: id})
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-
-	ctx := context.Background()
-	store := memory.NewStore(database.SQLDB())
-	if err := store.DeleteEntry(ctx, id); err != nil {
-		return fmt.Errorf("delete entry: %w", err)
-	}
-
 	fmt.Printf("deleted entry %d\n", id)
 	return nil
 }
 
-// cmdSession handles session subcommands like "start" and "end".
-func cmdSession(args []string) error {
+// cmdSession handles session subcommands.
+func (c *CLI) cmdSession(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: ilnamiqui session <start|end>")
 	}
-
 	sub := args[0]
 	subArgs := args[1:]
-
 	switch sub {
 	case "start":
-		return cmdSessionStart(subArgs)
+		return c.cmdSessionStart(subArgs)
 	case "end":
-		return cmdSessionEnd(subArgs)
+		return c.cmdSessionEnd(subArgs)
 	default:
 		return fmt.Errorf("unknown session subcommand %q — use 'start' or 'end'", sub)
 	}
 }
 
-// cmdSessionStart starts a new session for the project and prints the session ID.
-func cmdSessionStart(args []string) error {
+func (c *CLI) cmdSessionStart(args []string) error {
 	fs := flag.NewFlagSet("session start", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	database, projectSlug, err := openDB()
+	resp, err := c.svc.StartSession(context.Background(), &service.StartSessionRequest{})
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-
-	ctx := context.Background()
-	mgr := session.NewManager(database.SQLDB())
-	sess, err := mgr.StartSession(ctx, projectSlug)
-	if err != nil {
-		return fmt.Errorf("start session: %w", err)
-	}
-
-	fmt.Println(sess.ID)
+	fmt.Println(resp.Session.ID)
 	return nil
 }
 
-func cmdSessionEnd(args []string) error {
+func (c *CLI) cmdSessionEnd(args []string) error {
 	fs := flag.NewFlagSet("session end", flag.ContinueOnError)
 	summary := fs.String("summary", "", "session summary")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	database, projectSlug, err := openDB()
+	resp, err := c.svc.EndSession(context.Background(), &service.EndSessionRequest{Summary: *summary})
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-
-	ctx := context.Background()
-	mgr := session.NewManager(database.SQLDB())
-	sess, err := mgr.GetActiveSession(ctx, projectSlug)
-	if err != nil {
-		return fmt.Errorf("get active session: %w", err)
-	}
-
-	if err := mgr.EndSession(ctx, sess.ID, *summary); err != nil {
-		return fmt.Errorf("end session: %w", err)
-	}
-
-	fmt.Printf("ended session %s\n", sess.ID)
+	fmt.Printf("ended session %s\n", resp.Session.ID)
 	return nil
 }
 
@@ -360,7 +281,7 @@ func cmdVersion() error {
 	return nil
 }
 
-// printHelp prints usage information for the CLI.
+// printHelp prints usage information.
 func printHelp() error {
 	const help = `ilnamiqui — session memory for opencode (Nahuatl: "to remember")
 
@@ -373,8 +294,8 @@ Commands:
   load [--session] [--limit N]
                         Load memory entries (all or current session)
   list [--limit N]      List recent sessions
-  search <query> [--limit N]
-                        Search memory entries by key or value
+  search <query> [--after DATE] [--before DATE] [--limit N]
+                        Search memory entries by key or value, optionally filtered by date
   delete <id>           Delete a memory entry by ID
   session start         Start a new session
   session end [--summary "text"]
@@ -391,25 +312,17 @@ Use "ilnamiqui help <command>" for more details on a specific command.
 	return nil
 }
 
-// openDB finds the project root, opens the DB, and verifies migrations.
-func openDB() (*db.DB, string, error) {
-	dbPath, err := config.DBPath()
-	if err != nil {
-		return nil, "", fmt.Errorf("find db path: %w\n\nRun 'ilnamiqui init' first", err)
+// parseDate parses a date string in RFC3339 or YYYY-MM-DD format.
+func parseDate(s string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, s)
+	if err == nil {
+		return t, nil
 	}
-
-	database, err := db.NewDB(dbPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("open db: %w", err)
+	t, err = time.Parse("2006-01-02", s)
+	if err == nil {
+		return t, nil
 	}
-
-	projectSlug, err := config.ProjectSlug()
-	if err != nil {
-		database.Close() //nolint:errcheck
-		return nil, "", err
-	}
-
-	return database, projectSlug, nil
+	return time.Time{}, fmt.Errorf("expected RFC3339 (2006-01-02T15:04:05Z) or YYYY-MM-DD (2006-01-02), got %q", s)
 }
 
 // printJSON writes v as indented JSON to stdout.
