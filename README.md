@@ -23,6 +23,14 @@ curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/insta
 
 Restart opencode. Done.
 
+## Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/uninstall.sh | bash
+```
+
+Restart opencode. Done.
+
 ## Usage
 
 ```bash
