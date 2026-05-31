@@ -158,6 +158,7 @@ echo ""
 if [ "$DRY_RUN" = true ]; then
   action "[dry-run] Would download archive: ${DOWNLOAD_URL}"
   info "[dry-run] Would extract and install binary to: ${BINARY_PATH}"
+  info "[dry-run] Would create symlink: ${BINARY_PATH} → ${HOME}/.local/bin/ilnamiqui"
 else
   action "Downloading archive..."
   TMP_DIR=$(mktemp -d /tmp/ilnamiqui.XXXXXXXX)
@@ -189,6 +190,11 @@ else
   chmod +x "$BINARY_PATH"
   rm -rf "$TMP_DIR"
   info "Binary installed to ${BINARY_PATH}"
+
+  # Create symlink in ~/.local/bin for CLI access
+  mkdir -p "${HOME}/.local/bin"
+  ln -sf "$BINARY_PATH" "${HOME}/.local/bin/ilnamiqui"
+  info "Symlink created: ${HOME}/.local/bin/ilnamiqui → ${BINARY_PATH}"
 fi
 
 # 3. Download SKILL.md

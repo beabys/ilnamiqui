@@ -82,6 +82,20 @@ else
   info "Binary directory not found, skipping: ${BIN_DIR}"
 fi
 
+# 1.a Remove CLI symlink
+SYMLINK_PATH="${HOME}/.local/bin/ilnamiqui"
+if [ -f "$SYMLINK_PATH" ] || [ -L "$SYMLINK_PATH" ]; then
+  action "Removing CLI symlink: ${SYMLINK_PATH}"
+  if [ "$DRY_RUN" = true ]; then
+    info "[dry-run] Would run: rm -f ${SYMLINK_PATH}"
+  else
+    rm -f "$SYMLINK_PATH"
+    info "Removed ${SYMLINK_PATH}"
+  fi
+else
+  info "CLI symlink not found, skipping: ${SYMLINK_PATH}"
+fi
+
 # 2. Remove plugin file
 if [ -f "$PLUGIN_PATH" ] || [ -L "$PLUGIN_PATH" ]; then
   action "Removing plugin file: ${PLUGIN_PATH}"
