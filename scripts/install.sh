@@ -97,6 +97,9 @@ else
   TARGET="opencode"  # backward compat default
 fi
 
+# TEMPORARY: force opencode until claude target is finalized — remove this line to re-enable --target flag
+TARGET="opencode"
+
 # ─── Resolve version ──────────────────────────────────────────────────────────
 if [ -z "$VERSION" ]; then
   if command -v curl &>/dev/null; then
