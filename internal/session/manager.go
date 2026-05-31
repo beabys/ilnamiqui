@@ -107,7 +107,7 @@ func (m *Manager) ListSessions(ctx context.Context, project string, limit int) (
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var sessions []memory.Session
 	for rows.Next() {

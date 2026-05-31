@@ -1,4 +1,4 @@
-.PHONY: build test test-integration vet clean build-all release
+.PHONY: build test test-integration vet coverage clean build-all release
 
 BINARY=ilnamiqui
 VERSION?=dev
@@ -14,6 +14,13 @@ test-integration:
 
 vet:
 	go vet ./...
+
+coverage:
+	@echo "Generating coverage report (skipping internal/mocks)..."
+	@go list ./... | grep -v internal/mocks | xargs go test -coverprofile=coverage.out -covermode=atomic -count=1
+	@go tool cover -func=coverage.out | tail -1
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
 
 build-all:
 	./scripts/build.sh $(VERSION)

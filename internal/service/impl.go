@@ -40,7 +40,7 @@ func (s *serviceImpl) ensureDB() error {
 	}
 	projectSlug, err := s.config.ProjectSlug()
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		return err
 	}
 	s.database = database
@@ -57,7 +57,7 @@ func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, 
 
 	// Close any existing connection
 	if s.database != nil {
-		s.database.Close()
+		_ = s.database.Close()
 		s.database = nil
 		s.store = nil
 		s.mgr = nil
@@ -78,7 +78,7 @@ func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, 
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 	if err := s.dbOpener.RunMigrations(database.SQLDB()); err != nil {
-		database.Close()
+		_ = database.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
@@ -87,7 +87,7 @@ func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, 
 	projectSlug, err := s.config.ProjectSlug()
 	if err != nil {
 		s.database = nil
-		database.Close()
+		_ = database.Close()
 		return nil, fmt.Errorf("project slug: %w", err)
 	}
 	s.project = projectSlug

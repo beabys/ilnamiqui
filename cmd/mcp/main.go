@@ -13,7 +13,7 @@ import (
 
 func main() {
 	svc := service.New(service.DefaultConfig(), service.DefaultDBOpener())
-	defer svc.Close()
+	defer svc.Close() //nolint:errcheck
 
 	s := server.NewMCPServer(
 		"ilnamiqui-mcp",

@@ -339,9 +339,9 @@ func printEntriesTable(entries []memory.MemoryEntry) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tKey\tValue\tSession ID\tCreated")
+	_, _ = fmt.Fprintln(w, "ID\tKey\tValue\tSession ID\tCreated")
 	for _, e := range entries {
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", e.ID, e.Key, e.Value, e.SessionID, e.CreatedAt.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", e.ID, e.Key, e.Value, e.SessionID, e.CreatedAt.Format(time.RFC3339))
 	}
 	return w.Flush()
 }
@@ -353,13 +353,13 @@ func printSessionsTable(sessions []memory.Session) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tProject\tStarted\tEnded\tSummary")
+	_, _ = fmt.Fprintln(w, "ID\tProject\tStarted\tEnded\tSummary")
 	for _, s := range sessions {
 		ended := ""
 		if s.EndedAt != nil {
 			ended = s.EndedAt.Format(time.RFC3339)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Project, s.StartedAt.Format(time.RFC3339), ended, s.Summary)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Project, s.StartedAt.Format(time.RFC3339), ended, s.Summary)
 	}
 	return w.Flush()
 }

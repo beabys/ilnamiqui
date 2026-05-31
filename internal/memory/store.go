@@ -122,7 +122,7 @@ func (s *Store) queryEntries(ctx context.Context, query string, args ...any) ([]
 	if err != nil {
 		return nil, fmt.Errorf("query entries: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var entries []MemoryEntry
 	for rows.Next() {
