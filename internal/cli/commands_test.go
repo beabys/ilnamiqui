@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beabys/ilnamiqui/internal/db"
 	"github.com/beabys/ilnamiqui/internal/memory"
 )
 
@@ -384,6 +385,56 @@ func TestRun_initCreatesDotOpenCode(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatal(".opencode is not a directory")
+	}
+}
+
+func TestRun_initSchema(t *testing.T) {
+	dir := t.TempDir()
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	_ = os.Chdir(dir)
+
+	if err := Run([]string{"init"}); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	// Reopen DB and check schema
+	db, err := db.NewDB(dir + "/.opencode/ilnamiqui.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	// Check sessions table exists with correct columns
+	rows, err := db.SQLDB().Query("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'")
+	if err != nil {
+		t.Fatalf("query sessions table: %v", err)
+	}
+	if !rows.Next() {
+		t.Fatal("sessions table not found")
+	}
+	rows.Close()
+
+	// Check memory_entries table exists
+	rows, err = db.SQLDB().Query("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_entries'")
+	if err != nil {
+		t.Fatalf("query memory_entries table: %v", err)
+	}
+	if !rows.Next() {
+		t.Fatal("memory_entries table not found")
+	}
+	rows.Close()
+
+	// Check indexes exist
+	for _, idx := range []string{"idx_memory_session_id", "idx_memory_key", "idx_sessions_project"} {
+		rows, err = db.SQLDB().Query("SELECT name FROM sqlite_master WHERE type='index' AND name=?", idx)
+		if err != nil {
+			t.Fatalf("query index %s: %v", idx, err)
+		}
+		if !rows.Next() {
+			t.Fatalf("index %s not found", idx)
+		}
+		rows.Close()
 	}
 }
 

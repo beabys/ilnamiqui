@@ -126,7 +126,7 @@ fi
 echo ""
 action "Updating opencode.json..."
 
-PLUGIN_ENTRY="~/.config/opencode/plugins/ilnamiqui.ts"
+PLUGIN_ENTRY="./plugins/ilnamiqui.ts"
 
 if [ ! -f "$OPENCODE_CONFIG" ]; then
   info "Config not found, skipping: ${OPENCODE_CONFIG}"
