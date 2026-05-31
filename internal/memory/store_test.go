@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -97,7 +98,7 @@ func TestLoadEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries, err := store.LoadEntries(ctx, "test-session")
+	entries, err := store.LoadEntries(ctx, "test-session", 0)
 	if err != nil {
 		t.Fatalf("LoadEntries error: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestLoadEntries_empty(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	entries, err := store.LoadEntries(ctx, "nonexistent-session")
+	entries, err := store.LoadEntries(ctx, "nonexistent-session", 0)
 	if err != nil {
 		t.Fatalf("LoadEntries error: %v", err)
 	}
@@ -146,7 +147,7 @@ func TestLoadAllEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries, err := store.LoadAllEntries(ctx)
+	entries, err := store.LoadAllEntries(ctx, 0)
 	if err != nil {
 		t.Fatalf("LoadAllEntries error: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search by key
-	entries, err := store.SearchEntries(ctx, "architecture")
+	entries, err := store.SearchEntries(ctx, "architecture", 0)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search by value
-	entries, err = store.SearchEntries(ctx, "hexagonal")
+	entries, err = store.SearchEntries(ctx, "hexagonal", 0)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -193,7 +194,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search matching both key and value
-	entries, err = store.SearchEntries(ctx, "SQLite")
+	entries, err = store.SearchEntries(ctx, "SQLite", 0)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search with no match
-	entries, err = store.SearchEntries(ctx, "nonexistent")
+	entries, err = store.SearchEntries(ctx, "nonexistent", 0)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -226,7 +227,7 @@ func TestDeleteEntry(t *testing.T) {
 	}
 
 	// Verify deleted
-	entries, err := store.LoadEntries(ctx, "test-session")
+	entries, err := store.LoadEntries(ctx, "test-session", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +266,7 @@ func TestDuplicateKeys(t *testing.T) {
 		t.Fatal("expected different IDs for duplicate key entries")
 	}
 
-	entries, err := store.LoadEntries(ctx, "test-session")
+	entries, err := store.LoadEntries(ctx, "test-session", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,12 +312,137 @@ func TestSQLInjection(t *testing.T) {
 	}
 
 	// Verify table still exists
-	entries, err := store.LoadAllEntries(ctx)
+	entries, err := store.LoadAllEntries(ctx, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d — table may have been dropped", len(entries))
+	}
+}
+
+func TestLoadEntries_withLimit(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Save 3 entries
+	for i := 0; i < 3; i++ {
+		_, err := store.SaveEntry(ctx, "test-session", fmt.Sprintf("k%d", i), fmt.Sprintf("v%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Load with limit 1
+	entries, err := store.LoadEntries(ctx, "test-session", 1)
+	if err != nil {
+		t.Fatalf("LoadEntries error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry with limit=1, got %d", len(entries))
+	}
+}
+
+func TestLoadAllEntries_withLimit(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Insert a second session
+	if _, err := db.Exec(`INSERT INTO sessions (id, project, started_at) VALUES (?, ?, ?)`,
+		"test-session-2", "test-project", "2024-01-02T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save 3 entries across sessions
+	for i := 0; i < 3; i++ {
+		sid := "test-session"
+		if i == 2 {
+			sid = "test-session-2"
+		}
+		_, err := store.SaveEntry(ctx, sid, fmt.Sprintf("k%d", i), fmt.Sprintf("v%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Load with limit 2
+	entries, err := store.LoadAllEntries(ctx, 2)
+	if err != nil {
+		t.Fatalf("LoadAllEntries error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries with limit=2, got %d", len(entries))
+	}
+}
+
+func TestSearchEntries_withLimit(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Save 3 entries all with "test" in value
+	for i := 0; i < 3; i++ {
+		_, err := store.SaveEntry(ctx, "test-session", fmt.Sprintf("k%d", i), fmt.Sprintf("test value %d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Search with limit 1
+	entries, err := store.SearchEntries(ctx, "test", 1)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry with limit=1, got %d", len(entries))
+	}
+}
+
+func TestLoadEntries_limitZero(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Save 3 entries
+	for i := 0; i < 3; i++ {
+		_, err := store.SaveEntry(ctx, "test-session", fmt.Sprintf("k%d", i), fmt.Sprintf("v%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Load with limit 0 — should return all (backward compat)
+	entries, err := store.LoadEntries(ctx, "test-session", 0)
+	if err != nil {
+		t.Fatalf("LoadEntries error: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries with limit=0, got %d", len(entries))
+	}
+}
+
+func TestLoadEntries_limitMoreThanTotal(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Save 3 entries
+	for i := 0; i < 3; i++ {
+		_, err := store.SaveEntry(ctx, "test-session", fmt.Sprintf("k%d", i), fmt.Sprintf("v%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Load with limit 10 — should return all 3 (no crash)
+	entries, err := store.LoadEntries(ctx, "test-session", 10)
+	if err != nil {
+		t.Fatalf("LoadEntries error: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries with limit=10, got %d", len(entries))
 	}
 }
 

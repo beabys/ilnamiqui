@@ -109,7 +109,7 @@ const plugin: Plugin = async ({ $ }) => {
           if (sessionContextLoaded) return
           sessionContextLoaded = true
           log("session.start — loading context")
-          await $`${binary} load --pretty`.nothrow()
+          await $`${binary} load --pretty --limit 50`.nothrow()
           return
         }
 

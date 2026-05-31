@@ -4,6 +4,7 @@ package cli
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -119,6 +120,53 @@ func TestIntegrationLoadPretty(t *testing.T) {
 	}
 	if !strings.Contains(output, "nil pointer in handler") {
 		t.Fatalf("expected entry 'nil pointer in handler' in output: %s", output)
+	}
+}
+
+func TestIntegrationLoadPrettyWithLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	dir := t.TempDir()
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	_ = os.Chdir(dir)
+
+	// Init
+	if err := Run([]string{"init"}); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	// Save 3 entries
+	for i := 0; i < 3; i++ {
+		if err := Run([]string{"save", fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)}); err != nil {
+			t.Fatalf("save error: %v", err)
+		}
+	}
+
+	// Load with --pretty --limit 2
+	output := captureStdout(t, func() {
+		if err := Run([]string{"load", "--pretty", "--limit", "2"}); err != nil {
+			t.Fatalf("load --pretty --limit error: %v", err)
+		}
+	})
+
+	// Verify table headers present
+	if !strings.Contains(output, "ID") {
+		t.Fatalf("expected table header 'ID', got: %s", output)
+	}
+	if !strings.Contains(output, "Key") {
+		t.Fatalf("expected table header 'Key', got: %s", output)
+	}
+	if !strings.Contains(output, "Value") {
+		t.Fatalf("expected table header 'Value', got: %s", output)
+	}
+
+	// Count rows (non-header lines with tab-separated values)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 3 { // header + 2 data rows
+		t.Fatalf("expected 3 lines (header + 2 data rows), got %d: %v", len(lines), lines)
 	}
 }
 

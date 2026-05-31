@@ -41,25 +41,37 @@ func (s *Store) SaveEntry(ctx context.Context, sessionID, key, value string) (*M
 	}, nil
 }
 
-// LoadEntries returns all entries for a session ordered by created_at DESC.
-func (s *Store) LoadEntries(ctx context.Context, sessionID string) ([]MemoryEntry, error) {
-	const query = `SELECT id, session_id, key, value, created_at FROM memory_entries WHERE session_id = ? ORDER BY created_at DESC, id DESC`
-
+// LoadEntries returns entries for a session ordered by created_at DESC.
+// If limit > 0, at most limit entries are returned.
+func (s *Store) LoadEntries(ctx context.Context, sessionID string, limit int) ([]MemoryEntry, error) {
+	query := `SELECT id, session_id, key, value, created_at FROM memory_entries WHERE session_id = ? ORDER BY created_at DESC, id DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		return s.queryEntries(ctx, query, sessionID, limit)
+	}
 	return s.queryEntries(ctx, query, sessionID)
 }
 
 // LoadAllEntries returns all entries for the project ordered by created_at DESC.
-func (s *Store) LoadAllEntries(ctx context.Context) ([]MemoryEntry, error) {
-	const query = `SELECT id, session_id, key, value, created_at FROM memory_entries ORDER BY created_at DESC, id DESC`
-
+// If limit > 0, at most limit entries are returned.
+func (s *Store) LoadAllEntries(ctx context.Context, limit int) ([]MemoryEntry, error) {
+	query := `SELECT id, session_id, key, value, created_at FROM memory_entries ORDER BY created_at DESC, id DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		return s.queryEntries(ctx, query, limit)
+	}
 	return s.queryEntries(ctx, query)
 }
 
 // SearchEntries searches entries by key OR value using LIKE.
-func (s *Store) SearchEntries(ctx context.Context, queryStr string) ([]MemoryEntry, error) {
-	const query = `SELECT id, session_id, key, value, created_at FROM memory_entries WHERE key LIKE ? OR value LIKE ? ORDER BY created_at DESC, id DESC`
-
+// If limit > 0, at most limit entries are returned.
+func (s *Store) SearchEntries(ctx context.Context, queryStr string, limit int) ([]MemoryEntry, error) {
+	query := `SELECT id, session_id, key, value, created_at FROM memory_entries WHERE key LIKE ? OR value LIKE ? ORDER BY created_at DESC, id DESC`
 	pattern := "%" + queryStr + "%"
+	if limit > 0 {
+		query += ` LIMIT ?`
+		return s.queryEntries(ctx, query, pattern, pattern, limit)
+	}
 	return s.queryEntries(ctx, query, pattern, pattern)
 }
 

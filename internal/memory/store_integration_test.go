@@ -57,7 +57,7 @@ func TestIntegrationConcurrentWrites(t *testing.T) {
 	}
 
 	// Verify all entries were saved (no data loss)
-	entries, err := store.LoadEntries(ctx, "test-session")
+	entries, err := store.LoadEntries(ctx, "test-session", 0)
 	if err != nil {
 		t.Fatalf("LoadEntries error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestIntegrationSaveAndLoadCycle(t *testing.T) {
 	}
 
 	// Load by session
-	entries, err := store.LoadEntries(ctx, "test-session")
+	entries, err := store.LoadEntries(ctx, "test-session", 0)
 	if err != nil {
 		t.Fatalf("LoadEntries error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestIntegrationSaveAndLoadCycle(t *testing.T) {
 		t.Fatalf("DeleteEntry error: %v", err)
 	}
 
-	entries, err = store.LoadEntries(ctx, "test-session")
+	entries, err = store.LoadEntries(ctx, "test-session", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
