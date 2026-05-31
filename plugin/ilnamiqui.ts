@@ -1,6 +1,29 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import path from "path"
 import os from "os"
+import fs from "fs"
+
+// ---------------------------------------------------------------------------
+// Logger — writes to ~/.config/opencode/plugins/ilnamiqui/plugin.log
+// ---------------------------------------------------------------------------
+
+const LOG_FILE = path.join(
+  os.homedir(),
+  ".config",
+  "opencode",
+  "plugins",
+  "ilnamiqui",
+  "plugin.log",
+)
+
+function log(msg: string): void {
+  const ts = new Date().toISOString()
+  try {
+    fs.appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`)
+  } catch {
+    /* best effort */
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Platform → binary name resolution
@@ -45,6 +68,7 @@ function resolveBinaryPath(): {
 
 const plugin: Plugin = async ({ $ }) => {
   const resolved = resolveBinaryPath()
+  let sessionContextLoaded = false
 
   // Try platform-specific binary first, then bare name (dev installs)
   const binary = await (async (): Promise<string | null> => {
@@ -59,24 +83,18 @@ const plugin: Plugin = async ({ $ }) => {
       return "ilnamiqui"
     } catch {
       // not in PATH either — plugin is unusable
-      console.warn(
-        `[ilnamiqui] binary not found (tried ${resolved.name} and ilnamiqui in PATH) — plugin disabled`
-      )
       return null
     }
   })()
 
-  if (!binary) return {}
-
-  // ----- Session start: inject previous context -----
-  try {
-    const { stdout } = await $`${binary} load --pretty`.quiet().nothrow()
-    if (stdout) {
-      // Context loaded — opencode will see the output in the system prompt
-    }
-  } catch {
-    // DB not yet initialized or first session — no context to load
+  if (!binary) {
+    log(
+      `binary not found (tried ${resolved.name} and PATH) — plugin disabled`,
+    )
+    return {}
   }
+
+  log(`binary found: ${binary}`)
 
   // ----- Event hooks -----
   return {
@@ -86,8 +104,18 @@ const plugin: Plugin = async ({ $ }) => {
         const type = typeof ev?.type === "string" ? ev.type : ""
         const name = typeof ev?.name === "string" ? ev.name : ""
 
+        // session.start — load previous context
+        if (type === "session.start" || name === "session.start") {
+          if (sessionContextLoaded) return
+          sessionContextLoaded = true
+          log("session.start — loading context")
+          await $`${binary} load --pretty`.nothrow()
+          return
+        }
+
         // session.end — persist session data
         if (type === "session.end" || name === "session.end") {
+          log("session.end — saving session")
           await $`${binary} session end --summary "session ended"`.quiet().nothrow()
           return
         }
@@ -96,19 +124,13 @@ const plugin: Plugin = async ({ $ }) => {
         if (type === "chat.message" || name === "chat.message") {
           const content = typeof ev?.content === "string" ? ev.content : ""
           if (content.trim() === "/exit") {
+            log("/exit — saving session")
             await $`${binary} session end --summary "session ended"`.quiet().nothrow()
           }
           return
         }
-
-        // session.start — already handled above in plugin init, but
-        // catch restart events mid-session (e.g., /session-memory init)
-        if (type === "session.start" || name === "session.start") {
-          await $`${binary} load --pretty`.quiet().nothrow()
-          return
-        }
-      } catch {
-        // Never let a plugin error crash opencode
+      } catch (e) {
+        log(`event error: ${e}`)
       }
     },
   }

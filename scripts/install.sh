@@ -222,7 +222,7 @@ else
 
   # Safe JSON update: add plugin if not present
   # Try jq first, then node, then python3
-  PLUGIN_ENTRY="~/.config/opencode/plugins/ilnamiqui.ts"
+  PLUGIN_ENTRY="./plugins/ilnamiqui.ts"
 
   if command -v jq &>/dev/null; then
     # jq approach
@@ -287,7 +287,7 @@ with open(cfg_path, 'w') as f:
   else
     error "Neither jq, node, nor python3 found. Cannot update ${OPENCODE_CONFIG}"
     error "Add this manually to ${OPENCODE_CONFIG}:"
-    error '  "plugin": ["~/.config/opencode/plugins/ilnamiqui.ts"]'
+    error '  "plugin": ["./plugins/ilnamiqui.ts"]'
     exit 1
   fi
 fi
