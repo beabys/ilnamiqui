@@ -1,4 +1,4 @@
-!cmd/ilnamiqui
+!cmd/cli
 # Binary
 /ilnamiqui
 ilnamiqui.exe
@@ -15,3 +15,5 @@ ilnamiqui.exe
 .DS_Store
 Thumbs.db
 .opencode/
+coverage.out
+coverage.html

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -58,16 +59,42 @@ func (s *Store) LoadAllEntries(ctx context.Context, limit int) ([]MemoryEntry, e
 	return s.queryEntries(ctx, query)
 }
 
-// SearchEntries searches entries by key OR value using LIKE.
+// SearchEntries searches entries by key, value, and/or date range.
+// queryStr can be empty (date-only search). after/before are optional date filters.
 // If limit > 0, at most limit entries are returned.
-func (s *Store) SearchEntries(ctx context.Context, queryStr string, limit int) ([]MemoryEntry, error) {
-	query := `SELECT id, session_id, key, value, created_at FROM memory_entries WHERE key LIKE ? OR value LIKE ? ORDER BY created_at DESC, id DESC`
-	pattern := "%" + queryStr + "%"
-	if limit > 0 {
-		query += ` LIMIT ?`
-		return s.queryEntries(ctx, query, pattern, pattern, limit)
+func (s *Store) SearchEntries(ctx context.Context, queryStr string, limit int, after, before *time.Time) ([]MemoryEntry, error) {
+	var conditions []string
+	var args []any
+
+	if queryStr != "" {
+		conditions = append(conditions, "(key LIKE ? OR value LIKE ?)")
+		pattern := "%" + queryStr + "%"
+		args = append(args, pattern, pattern)
 	}
-	return s.queryEntries(ctx, query, pattern, pattern)
+
+	if after != nil {
+		conditions = append(conditions, "created_at >= ?")
+		args = append(args, after.UTC().Format(time.RFC3339))
+	}
+
+	if before != nil {
+		conditions = append(conditions, "created_at <= ?")
+		args = append(args, before.UTC().Format(time.RFC3339))
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query := "SELECT id, session_id, key, value, created_at FROM memory_entries" + where + " ORDER BY created_at DESC, id DESC"
+
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	return s.queryEntries(ctx, query, args...)
 }
 
 // DeleteEntry deletes a memory entry by its ID.
@@ -95,7 +122,7 @@ func (s *Store) queryEntries(ctx context.Context, query string, args ...any) ([]
 	if err != nil {
 		return nil, fmt.Errorf("query entries: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var entries []MemoryEntry
 	for rows.Next() {

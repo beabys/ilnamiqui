@@ -15,15 +15,25 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     OS="${PLATFORM%/*}"
     ARCH="${PLATFORM#*/}"
     OUTPUT_NAME="ilnamiqui-${OS}-${ARCH}"
+    MCP_OUTPUT_NAME="ilnamiqui-mcp-${OS}-${ARCH}"
     if [ "$OS" = "windows" ]; then
         OUTPUT_NAME="${OUTPUT_NAME}.exe"
+        MCP_OUTPUT_NAME="${MCP_OUTPUT_NAME}.exe"
     fi
 
     echo "  Building for ${OS}/${ARCH}..."
+
+    # Main CLI binary
     GOOS=$OS GOARCH=$ARCH go build \
         -ldflags="-X 'github.com/beabys/ilnamiqui/internal/cli.version=${VERSION}'" \
         -o "${OUTPUT_DIR}/${OUTPUT_NAME}" \
-        ./cmd/ilnamiqui/
+        ./cmd/cli/
+
+    # MCP server binary
+    GOOS=$OS GOARCH=$ARCH go build \
+        -ldflags="-X 'github.com/beabys/ilnamiqui/internal/cli.version=${VERSION}'" \
+        -o "${OUTPUT_DIR}/${MCP_OUTPUT_NAME}" \
+        ./cmd/mcp/
 done
 
 echo ""

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -176,7 +177,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search by key
-	entries, err := store.SearchEntries(ctx, "architecture", 0)
+	entries, err := store.SearchEntries(ctx, "architecture", 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search by value
-	entries, err = store.SearchEntries(ctx, "hexagonal", 0)
+	entries, err = store.SearchEntries(ctx, "hexagonal", 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search matching both key and value
-	entries, err = store.SearchEntries(ctx, "SQLite", 0)
+	entries, err = store.SearchEntries(ctx, "SQLite", 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -203,7 +204,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search with no match
-	entries, err = store.SearchEntries(ctx, "nonexistent", 0)
+	entries, err = store.SearchEntries(ctx, "nonexistent", 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -391,13 +392,95 @@ func TestSearchEntries_withLimit(t *testing.T) {
 	}
 
 	// Search with limit 1
-	entries, err := store.SearchEntries(ctx, "test", 1)
+	entries, err := store.SearchEntries(ctx, "test", 1, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry with limit=1, got %d", len(entries))
 	}
+}
+
+func TestSearchEntries_WithDateRange(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+	// Use the stub session already inserted by openTestDB
+	sessionID := "test-session"
+
+	// Insert entries with specific dates
+	entries := []struct {
+		key, value, createdAt string
+	}{
+		{"old", "old entry", "2025-01-01T00:00:00Z"},
+		{"mid", "mid entry", "2026-01-01T00:00:00Z"},
+		{"new", "new entry", "2027-01-01T00:00:00Z"},
+	}
+
+	for _, e := range entries {
+		query := `INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`
+		_, err := store.db.ExecContext(ctx, query, sessionID, e.key, e.value, e.createdAt)
+		if err != nil {
+			t.Fatalf("insert %s: %v", e.key, err)
+		}
+	}
+
+	after := parseTime(t, "2026-01-01T00:00:00Z")
+	before := parseTime(t, "2027-06-01T00:00:00Z")
+
+	// Test: only date range, no query
+	results, err := store.SearchEntries(ctx, "", 0, &after, &before)
+	if err != nil {
+		t.Fatalf("SearchEntries date range: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 entries in date range, got %d", len(results))
+	}
+
+	// Test: query + date range combined
+	results, err = store.SearchEntries(ctx, "mid", 0, &after, &before)
+	if err != nil {
+		t.Fatalf("SearchEntries query + date: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 entry for 'mid' in range, got %d", len(results))
+	}
+
+	// Test: only after, no before
+	results, err = store.SearchEntries(ctx, "", 0, &after, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries after only: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 entries after 2026, got %d", len(results))
+	}
+
+	// Test: date range with no matches
+	farFuture := parseTime(t, "2030-01-01T00:00:00Z")
+	results, err = store.SearchEntries(ctx, "", 0, &farFuture, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries no match: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 entries after 2030, got %d", len(results))
+	}
+
+	// Test: no query, no date range — returns all
+	results, err = store.SearchEntries(ctx, "", 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries no filters: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 entries with no filters, got %d", len(results))
+	}
+}
+
+func parseTime(t *testing.T, s string) time.Time {
+	tm, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("parse time %q: %v", s, err)
+	}
+	return tm
 }
 
 func TestLoadEntries_limitZero(t *testing.T) {
