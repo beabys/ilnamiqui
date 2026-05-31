@@ -140,6 +140,7 @@ func cmdLoad(args []string) error {
 	fs := flag.NewFlagSet("load", flag.ContinueOnError)
 	sessionFlag := fs.Bool("session", false, "load entries for active session only")
 	pretty := fs.Bool("pretty", false, "human-readable output")
+	limit := fs.Int("limit", 0, "maximum number of entries to return (0 = no limit)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -161,13 +162,13 @@ func cmdLoad(args []string) error {
 		if err != nil {
 			return fmt.Errorf("get active session: %w", err)
 		}
-		entries, err = store.LoadEntries(ctx, sess.ID)
+		entries, err = store.LoadEntries(ctx, sess.ID, *limit)
 		if err != nil {
 			return fmt.Errorf("load entries: %w", err)
 		}
 	} else {
 		var err error
-		entries, err = store.LoadAllEntries(ctx)
+		entries, err = store.LoadAllEntries(ctx, *limit)
 		if err != nil {
 			return fmt.Errorf("load all entries: %w", err)
 		}
@@ -213,6 +214,7 @@ func cmdList(args []string) error {
 func cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	pretty := fs.Bool("pretty", false, "human-readable output")
+	limit := fs.Int("limit", 0, "maximum number of entries to return (0 = no limit)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -231,7 +233,7 @@ func cmdSearch(args []string) error {
 
 	ctx := context.Background()
 	store := memory.NewStore(database.SQLDB())
-	entries, err := store.SearchEntries(ctx, query)
+	entries, err := store.SearchEntries(ctx, query, *limit)
 	if err != nil {
 		return fmt.Errorf("search entries: %w", err)
 	}
@@ -364,9 +366,11 @@ Usage:
 Commands:
   init                  Initialize database in .opencode/
   save <key> <value>    Save a memory entry
-  load [--session]      Load memory entries (all or current session)
+  load [--session] [--limit N]
+                        Load memory entries (all or current session)
   list [--limit N]      List recent sessions
-  search <query>        Search memory entries by key or value
+  search <query> [--limit N]
+                        Search memory entries by key or value
   delete <id>           Delete a memory entry by ID
   session start         Start a new session
   session end [--summary "text"]

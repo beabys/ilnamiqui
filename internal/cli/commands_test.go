@@ -476,6 +476,84 @@ func TestRun_loadEmpty(t *testing.T) {
 	}
 }
 
+func TestRun_loadWithLimit(t *testing.T) {
+	_ = setupProject(t)
+
+	// Save 3 entries
+	for i := 0; i < 3; i++ {
+		if err := Run([]string{"save", fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Load with limit 2
+	output := captureStdout(t, func() {
+		if err := Run([]string{"load", "--limit", "2"}); err != nil {
+			t.Fatalf("load --limit error: %v", err)
+		}
+	})
+
+	var entries []memory.MemoryEntry
+	if err := json.Unmarshal([]byte(output), &entries); err != nil {
+		t.Fatalf("unmarshal: %v\noutput: %s", err, output)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries with limit=2, got %d", len(entries))
+	}
+}
+
+func TestRun_searchWithLimit(t *testing.T) {
+	_ = setupProject(t)
+
+	// Save 3 entries with "common" in value
+	for i := 0; i < 3; i++ {
+		if err := Run([]string{"save", fmt.Sprintf("k%d", i), fmt.Sprintf("common value %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Search with limit 1
+	output := captureStdout(t, func() {
+		if err := Run([]string{"search", "--limit", "1", "common"}); err != nil {
+			t.Fatalf("search --limit error: %v", err)
+		}
+	})
+
+	var entries []memory.MemoryEntry
+	if err := json.Unmarshal([]byte(output), &entries); err != nil {
+		t.Fatalf("unmarshal: %v\noutput: %s", err, output)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry with limit=1, got %d", len(entries))
+	}
+}
+
+func TestRun_loadLimitZero(t *testing.T) {
+	_ = setupProject(t)
+
+	// Save 3 entries
+	for i := 0; i < 3; i++ {
+		if err := Run([]string{"save", fmt.Sprintf("k%d", i), fmt.Sprintf("v%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Load with limit 0 — should return all
+	output := captureStdout(t, func() {
+		if err := Run([]string{"load", "--limit", "0"}); err != nil {
+			t.Fatalf("load --limit 0 error: %v", err)
+		}
+	})
+
+	var entries []memory.MemoryEntry
+	if err := json.Unmarshal([]byte(output), &entries); err != nil {
+		t.Fatalf("unmarshal: %v\noutput: %s", err, output)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries with limit=0, got %d", len(entries))
+	}
+}
+
 func TestRun_listEmpty(t *testing.T) {
 	_ = setupProject(t)
 
