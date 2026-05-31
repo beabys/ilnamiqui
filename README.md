@@ -45,7 +45,7 @@ Restart opencode. Done.
 
 Alternatively:
 
-- **Go install** (requires Go 1.23+):
+- **Go install** (requires Go 1.26+):
   ```bash
   go install github.com/beabys/ilnamiqui/cmd/ilnamiqui@latest
   ```
