@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ilnamiqui installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash
-#        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --version v0.1.0
+#        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --version v1.0.0
 #        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --dry-run
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -75,8 +75,8 @@ if [ -z "$VERSION" ]; then
 
   if [ -z "$VERSION" ]; then
     echo "ERROR: Could not determine latest version. Set VERSION env var or use --version."
-    echo "  curl -fsSL ... | VERSION=v0.1.0 bash"
-    echo "  curl -fsSL ... | bash -s -- --version v0.1.0"
+    echo "  curl -fsSL ... | VERSION=v1.0.0 bash"
+    echo "  curl -fsSL ... | bash -s -- --version v1.0.0"
     exit 1
   fi
 fi
