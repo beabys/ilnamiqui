@@ -222,10 +222,10 @@ else
     # jq approach
     tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
     if jq --arg p "$PLUGIN_ENTRY" '
-      if (.plugins // false) then
-        if (.plugins | index($p)) then . else .plugins += [$p] end
+      if (.plugin // false) then
+        if (.plugin | index($p)) then . else .plugin += [$p] end
       else
-        .plugins = [$p]
+        .plugin = [$p]
       end
     ' "$OPENCODE_CONFIG" > "$tmp" 2>/dev/null; then
       mv "$tmp" "$OPENCODE_CONFIG"
@@ -245,8 +245,8 @@ else
       let cfg = {};
       try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')); } catch(e) {}
       const entry = '${PLUGIN_ENTRY}';
-      if (!cfg.plugins) cfg.plugins = [];
-      if (!cfg.plugins.includes(entry)) cfg.plugins.push(entry);
+      if (!cfg.plugin) cfg.plugin = [];
+      if (!cfg.plugin.includes(entry)) cfg.plugin.push(entry);
       fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
     " 2>/dev/null || {
       error "node script failed"
@@ -265,10 +265,10 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 entry = '${PLUGIN_ENTRY}'
-if 'plugins' not in cfg:
-    cfg['plugins'] = []
-if entry not in cfg['plugins']:
-    cfg['plugins'].append(entry)
+if 'plugin' not in cfg:
+    cfg['plugin'] = []
+if entry not in cfg['plugin']:
+    cfg['plugin'].append(entry)
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
     f.write('\n')
@@ -281,7 +281,7 @@ with open(cfg_path, 'w') as f:
   else
     error "Neither jq, node, nor python3 found. Cannot update ${OPENCODE_CONFIG}"
     error "Add this manually to ${OPENCODE_CONFIG}:"
-    error '  "plugins": ["~/.config/opencode/plugins/ilnamiqui.ts"]'
+    error '  "plugin": ["~/.config/opencode/plugins/ilnamiqui.ts"]'
     exit 1
   fi
 fi
