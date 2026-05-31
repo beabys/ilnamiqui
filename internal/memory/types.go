@@ -1,6 +1,14 @@
 package memory
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
+
+// Store provides CRUD operations for memory entries backed by SQLite.
+type Store struct {
+	db *sql.DB
+}
 
 // Session represents a single opencode session within a project.
 type Session struct {

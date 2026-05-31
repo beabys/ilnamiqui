@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-// Store provides CRUD operations for memory entries backed by SQLite.
-type Store struct {
-	db *sql.DB
-}
-
 // NewStore creates a new Store backed by the given *sql.DB.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}

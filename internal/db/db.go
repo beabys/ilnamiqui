@@ -31,17 +31,23 @@ func (d *DB) Open(path string) error {
 	}
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close() //nolint:errcheck
+		if err := db.Close(); err != nil {
+			slog.Error("failed to close db", "err", err)
+		}
 		return fmt.Errorf("enable WAL: %w", err)
 	}
 
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close() //nolint:errcheck
+		if err := db.Close(); err != nil {
+			slog.Error("failed to close db", "err", err)
+		}
 		return fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		db.Close() //nolint:errcheck
+		if err := db.Close(); err != nil {
+			slog.Error("failed to close db", "err", err)
+		}
 		return fmt.Errorf("set busy timeout: %w", err)
 	}
 

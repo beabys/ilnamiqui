@@ -28,7 +28,7 @@ func setupProject(t *testing.T) string {
 	}
 
 	// Run init
-	if err := Run([]string{"init"}); err != nil {
+	if err := Run([]string{INIT}); err != nil {
 		t.Fatalf("init error: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestRun_init(t *testing.T) {
 	_ = os.Chdir(dir)
 
 	output := captureStdout(t, func() {
-		if err := Run([]string{"init"}); err != nil {
+		if err := Run([]string{INIT}); err != nil {
 			t.Fatalf("init error: %v", err)
 		}
 	})
@@ -156,7 +156,7 @@ func TestRun_delete(t *testing.T) {
 
 	// Delete
 	output = captureStdout(t, func() {
-		if err := Run([]string{"delete", fmt.Sprintf("%d", entry.ID)}); err != nil {
+		if err := Run([]string{DELETE, fmt.Sprintf("%d", entry.ID)}); err != nil {
 			t.Fatalf("delete error: %v", err)
 		}
 	})
@@ -198,20 +198,20 @@ func TestRun_list(t *testing.T) {
 
 	// Create a session so list has data
 	output := captureStdout(t, func() {
-		if err := Run([]string{"session", "start"}); err != nil {
+		if err := Run([]string{SESSION, "start"}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	sessionID := strings.TrimSpace(output)
 
 	// End it with summary
-	if err := Run([]string{"session", "end", "--summary", "completed"}); err != nil {
+	if err := Run([]string{SESSION, "end", "--summary", "completed"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// List sessions
 	output = captureStdout(t, func() {
-		if err := Run([]string{"list"}); err != nil {
+		if err := Run([]string{LIST}); err != nil {
 			t.Fatalf("list error: %v", err)
 		}
 	})
@@ -281,7 +281,7 @@ func TestRun_saveWithoutInit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when saving without init")
 	}
-	if !strings.Contains(err.Error(), "init") {
+	if !strings.Contains(err.Error(), INIT) {
 		t.Fatalf("expected error to suggest 'init', got %v", err)
 	}
 }
@@ -289,7 +289,7 @@ func TestRun_saveWithoutInit(t *testing.T) {
 func TestRun_saveMissingArgs(t *testing.T) {
 	_ = setupProject(t)
 
-	err := Run([]string{"save"})
+	err := Run([]string{SAVE})
 	if err == nil {
 		t.Fatal("expected error for missing save args")
 	}
@@ -298,7 +298,7 @@ func TestRun_saveMissingArgs(t *testing.T) {
 func TestRun_deleteMissingArgs(t *testing.T) {
 	_ = setupProject(t)
 
-	err := Run([]string{"delete"})
+	err := Run([]string{DELETE})
 	if err == nil {
 		t.Fatal("expected error for missing delete args")
 	}
@@ -307,7 +307,7 @@ func TestRun_deleteMissingArgs(t *testing.T) {
 func TestRun_deleteInvalidID(t *testing.T) {
 	_ = setupProject(t)
 
-	err := Run([]string{"delete", "not-a-number"})
+	err := Run([]string{DELETE, "not-a-number"})
 	if err == nil {
 		t.Fatal("expected error for non-numeric delete ID")
 	}
@@ -316,14 +316,14 @@ func TestRun_deleteInvalidID(t *testing.T) {
 func TestRun_searchMissingArgs(t *testing.T) {
 	_ = setupProject(t)
 
-	err := Run([]string{"search"})
+	err := Run([]string{SEARCH})
 	if err == nil {
 		t.Fatal("expected error for missing search args")
 	}
 }
 
 func TestRun_sessionNoSubcommand(t *testing.T) {
-	err := Run([]string{"session"})
+	err := Run([]string{SESSION})
 	if err == nil {
 		t.Fatal("expected error for session without subcommand")
 	}
@@ -335,7 +335,7 @@ func TestRun_sessionEndNoActive(t *testing.T) {
 	// If no session exists, session end will create one via GetActiveSession then end it.
 	// This should succeed.
 	output := captureStdout(t, func() {
-		if err := Run([]string{"session", "end", "--summary", "auto"}); err != nil {
+		if err := Run([]string{SESSION, "end", "--summary", "auto"}); err != nil {
 			t.Fatalf("session end without start: %v", err)
 		}
 	})
@@ -348,13 +348,13 @@ func TestRun_loadSessionFlag(t *testing.T) {
 	_ = setupProject(t)
 
 	// Save without explicit session start — auto-creates session
-	if err := Run([]string{"save", "key1", "val1"}); err != nil {
+	if err := Run([]string{SAVE, "key1", "val1"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Load with --session flag
 	output := captureStdout(t, func() {
-		if err := Run([]string{"load", "--session"}); err != nil {
+		if err := Run([]string{LOAD, "--session"}); err != nil {
 			t.Fatalf("load --session error: %v", err)
 		}
 	})
@@ -375,7 +375,7 @@ func TestRun_initCreatesDotOpenCode(t *testing.T) {
 	_ = os.Chdir(dir)
 
 	// No .opencode dir — init should create it
-	if err := Run([]string{"init"}); err != nil {
+	if err := Run([]string{INIT}); err != nil {
 		t.Fatalf("init error: %v", err)
 	}
 
@@ -394,7 +394,7 @@ func TestRun_initSchema(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 	_ = os.Chdir(dir)
 
-	if err := Run([]string{"init"}); err != nil {
+	if err := Run([]string{INIT}); err != nil {
 		t.Fatalf("init error: %v", err)
 	}
 
