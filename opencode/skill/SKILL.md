@@ -12,7 +12,7 @@ metadata:
 
 **What:** Persists project context (decisions, bugs, architecture, notes)
 between opencode chats. Data stays in a local SQLite file per project
-(`.opencode/ilnamiqui.db`).
+(`.ilnamiqui/ilnamiqui.db`).
 
 **When:** Use at chat start (load past context), during conversation (save
 new info), and on `/exit` (auto-saved).

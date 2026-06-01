@@ -2,7 +2,7 @@
 
 **What:** Persists project context (decisions, bugs, architecture, notes)
 between Claude Code chats. Data stays in local SQLite file per project
-(`.claude/ilnamiqui.db` or `.opencode/ilnamiqui.db`).
+(`.ilnamiqui/ilnamiqui.db`).
 
 **How:** Three parts:
 - **Binary** — `ilnamiqui` CLI (manages SQLite)

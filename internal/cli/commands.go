@@ -289,7 +289,7 @@ Usage:
   ilnamiqui <command> [flags]
 
 Commands:
-  init                  Initialize database in .opencode/
+  init                  Initialize database in .ilnamiqui/
   save <key> <value>    Save a memory entry
   load [--session] [--limit N]
                         Load memory entries (all or current session)

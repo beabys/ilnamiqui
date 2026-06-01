@@ -82,23 +82,26 @@ if [ -n "$TARGET" ]; then
     echo "ERROR: Invalid target '$TARGET'. Use 'opencode' or 'claude'."
     exit 1
   fi
-elif [ "$IS_TTY" = true ]; then
+else
   echo ""
   echo "Which AI assistant?"
   echo "  1) opencode (default)"
   echo "  2) Claude Code"
-  read -p "Select [1]: " choice
+  if [ "$IS_TTY" = true ]; then
+    read -p "Select [1]: " choice
+  elif [ -e /dev/tty ]; then
+    read -p "Select [1]: " choice < /dev/tty
+  else
+    echo "Warning: no terminal available, defaulting to opencode"
+    echo "  Use --target to specify: curl ... | bash -s -- --target claude"
+    choice=""
+  fi
   echo ""
   case "$choice" in
     2|claude) TARGET="claude" ;;
     *) TARGET="opencode" ;;
   esac
-else
-  TARGET="opencode"  # backward compat default
 fi
-
-# TEMPORARY: force opencode until claude target is finalized — remove this line to re-enable --target flag
-# TARGET="opencode"
 
 # ─── Resolve version ──────────────────────────────────────────────────────────
 if [ -z "$VERSION" ]; then

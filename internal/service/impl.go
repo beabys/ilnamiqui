@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/beabys/ilnamiqui/internal/config"
 	"github.com/beabys/ilnamiqui/internal/memory"
 	"github.com/beabys/ilnamiqui/internal/session"
 )
@@ -30,6 +31,15 @@ func (s *serviceImpl) ensureDB() error {
 	if s.database != nil {
 		return nil
 	}
+
+	// Lazy migration: if .ilnamiqui/ sentinel missing, attempt legacy migration.
+	cwd, wdErr := os.Getwd()
+	if wdErr == nil && !config.IsInitialized(cwd) && config.NeedsMigration(cwd) {
+		if err := config.MigrateLegacy(cwd); err != nil {
+			return fmt.Errorf("auto-migrate: %w", err)
+		}
+	}
+
 	dbPath, err := s.config.DBPath()
 	if err != nil {
 		return fmt.Errorf("find db path: %w\n\nRun 'ilnamiqui init' first", err)
@@ -50,7 +60,7 @@ func (s *serviceImpl) ensureDB() error {
 	return nil
 }
 
-// Init creates .opencode directory and runs database migrations.
+// Init creates .ilnamiqui directory and runs database migrations.
 func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -68,11 +78,19 @@ func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, 
 	if err != nil {
 		return nil, fmt.Errorf("getwd: %w", err)
 	}
-	opencodeDir := cwd + "/.opencode"
-	if err := os.MkdirAll(opencodeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create .opencode directory: %w", err)
+
+	// Attempt migration from legacy .opencode/ storage first.
+	if config.NeedsMigration(cwd) {
+		if err := config.MigrateLegacy(cwd); err != nil {
+			return nil, fmt.Errorf("migrate legacy: %w", err)
+		}
 	}
-	dbPath := opencodeDir + "/ilnamiqui.db"
+
+	ilnamiquiDir := cwd + "/.ilnamiqui"
+	if err := os.MkdirAll(ilnamiquiDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create .ilnamiqui directory: %w", err)
+	}
+	dbPath := ilnamiquiDir + "/ilnamiqui.db"
 	database, err := s.dbOpener.NewDB(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -80,6 +98,12 @@ func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, 
 	if err := s.dbOpener.RunMigrations(database.SQLDB()); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
+	// Write sentinel file so future calls skip migration checks
+	if err := config.WriteSentinel(cwd); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("write sentinel: %w", err)
 	}
 
 	// Re-read project slug
