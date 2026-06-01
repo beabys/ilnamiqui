@@ -120,12 +120,20 @@ if [ -z "$VERSION" ]; then
 fi
 
 # ─── Paths ─────────────────────────────────────────────────────────────────────
-BIN_DIR="${HOME}/.config/opencode/plugins/ilnamiqui"
-SYMLINK_PATH="${HOME}/.local/bin/ilnamiqui"
+case "$TARGET" in
+  opencode)
+    BIN_DIR="${HOME}/.config/opencode/plugins/ilnamiqui"
+    SYMLINK_PATH="${HOME}/.local/bin/ilnamiqui"
+    ;;
+  claude)
+    BIN_DIR="${HOME}/.claude/plugins/ilnamiqui"
+    ;;
+esac
+
 OPENCODE_CONFIG="${HOME}/.config/opencode/opencode.json"
 CLAUDE_CONFIG="${HOME}/.claude/claude.json"
 CLAUDE_SKILL_DIR="${HOME}/.claude/skills/ilnamiqui"
-CLAUDE_SKILL_PATH="${CLAUDE_SKILL_DIR}/CLAUDE.md"
+CLAUDE_SKILL_PATH="${CLAUDE_SKILL_DIR}/SKILL.md"
 OPENCODE_SKILL_DIR="${HOME}/.config/opencode/skills/ilnamiqui"
 OPENCODE_PLUGIN_DIR="${HOME}/.config/opencode/plugins"
 
@@ -141,7 +149,7 @@ MCP_BINARY_PATH="${BIN_DIR}/${MCP_BINARY_NAME}"
 # URLs
 OPENCODE_SKILL_REPO_PATH="${RAW_BASE}/opencode/skill/SKILL.md"
 OPENCODE_PLUGIN_REPO_PATH="${RAW_BASE}/opencode/plugin/ilnamiqui.ts"
-CLAUDE_SKILL_REPO_PATH="${RAW_BASE}/claude/skill/CLAUDE.md"
+CLAUDE_SKILL_REPO_PATH="${RAW_BASE}/claude/skill/SKILL.md"
 
 # Archive URL — GoReleaser produces archives containing both binaries
 ARCHIVE_EXT=".tar.gz"
@@ -247,7 +255,6 @@ echo ""
 if [ "$DRY_RUN" = true ]; then
   action "[dry-run] Would download archive: ${DOWNLOAD_URL}"
   info "[dry-run] Would extract and install binary to: ${BINARY_PATH}"
-  info "[dry-run] Would create symlink: ${SYMLINK_PATH}"
 else
   action "Downloading archive..."
   TMP_DIR=$(mktemp -d /tmp/ilnamiqui.XXXXXXXX)
@@ -290,10 +297,7 @@ else
 
   rm -rf "$TMP_DIR"
 
-  # Create symlink in ~/.local/bin for CLI access
-  mkdir -p "${HOME}/.local/bin"
-  ln -sf "$BINARY_PATH" "$SYMLINK_PATH"
-  info "Symlink created: ${SYMLINK_PATH} → ${BINARY_PATH}"
+
 fi
 
 # ── Target-specific steps ──────────────────────────────────────────────────────
@@ -329,14 +333,29 @@ case "$TARGET" in
         "if (.plugin // false) then if (.plugin | index(\"${PLUGIN_ENTRY}\")) then . else .plugin += [\"${PLUGIN_ENTRY}\"] end else .plugin = [\"${PLUGIN_ENTRY}\"] end" \
         ""
     fi
+
+    # 6. Create CLI symlink (opencode only)
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would create symlink: ${SYMLINK_PATH} → ${BINARY_PATH}"
+    else
+      mkdir -p "${HOME}/.local/bin"
+      ln -sf "$BINARY_PATH" "$SYMLINK_PATH"
+      info "Symlink created: ${SYMLINK_PATH} → ${BINARY_PATH}"
+    fi
     ;;
 
   claude)
-    # 3. Download CLAUDE.md
+    # 3. Download SKILL.md
     echo ""
     action "Downloading Claude Code skill..."
     mkdir -p "$CLAUDE_SKILL_DIR"
-    download "$CLAUDE_SKILL_REPO_PATH" "$CLAUDE_SKILL_PATH" "CLAUDE.md"
+    # Remove old CLAUDE.md if exists (rename from previous installs)
+    if [ -f "${CLAUDE_SKILL_DIR}/CLAUDE.md" ] && [ "$DRY_RUN" = false ]; then
+      rm -f "${CLAUDE_SKILL_DIR}/CLAUDE.md"
+      info "Removed old CLAUDE.md (replaced by SKILL.md)"
+    fi
+
+    download "$CLAUDE_SKILL_REPO_PATH" "$CLAUDE_SKILL_PATH" "SKILL.md"
 
     # 4. Register MCP server in claude.json
     echo ""
@@ -392,6 +411,25 @@ with open(file, 'w') as f:
       error "Add this to ${CLAUDE_CONFIG}:"
       error "  { \"mcpServers\": { \"ilnamiqui\": { \"command\": \"${MCP_COMMAND}\", \"args\": [] } } }"
       exit 1
+    fi
+
+    # 5. Register skill in CLAUDE.md (so Claude Code loads it)
+    echo ""
+    action "Registering skill in CLAUDE.md..."
+    CLAUDE_HOME="${HOME}/.claude/CLAUDE.md"
+    INCLUDE_LINE="@skills/ilnamiqui/SKILL.md"
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would add '${INCLUDE_LINE}' to ${CLAUDE_HOME}"
+    else
+      if [ ! -f "$CLAUDE_HOME" ]; then
+        echo "$INCLUDE_LINE" > "$CLAUDE_HOME"
+        info "Created ${CLAUDE_HOME} with skill reference"
+      elif ! grep -Fxq "$INCLUDE_LINE" "$CLAUDE_HOME" 2>/dev/null; then
+        echo "$INCLUDE_LINE" >> "$CLAUDE_HOME"
+        info "Added skill reference to ${CLAUDE_HOME}"
+      else
+        info "Skill reference already present in ${CLAUDE_HOME}"
+      fi
     fi
     ;;
 esac
