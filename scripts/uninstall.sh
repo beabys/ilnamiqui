@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: bash scripts/uninstall.sh [--target opencode|claude|all] [--dry-run] [--quiet] [--help]
 
 # ─── Paths (must match install.sh) ─────────────────────────────────────────────
-BIN_DIR="${HOME}/.config/opencode/plugins/ilnamiqui"
+BIN_DIR=""
 OPENCODE_SKILL_DIR="${HOME}/.config/opencode/skills/ilnamiqui"
 OPENCODE_PLUGIN_PATH="${HOME}/.config/opencode/plugins/ilnamiqui.ts"
 OPENCODE_CONFIG="${HOME}/.config/opencode/opencode.json"
@@ -100,6 +100,19 @@ if [ "$TARGET" != "opencode" ] && [ "$TARGET" != "claude" ] && [ "$TARGET" != "a
   error "Invalid target '$TARGET'. Use 'opencode', 'claude', or 'all'."
   exit 1
 fi
+
+# Set BIN_DIR based on target
+case "$TARGET" in
+  opencode)
+    BIN_DIR="${HOME}/.config/opencode/plugins/ilnamiqui"
+    ;;
+  claude)
+    BIN_DIR="${HOME}/.claude/plugins/ilnamiqui"
+    ;;
+  all)
+    # BIN_DIR not set for 'all' - we handle both paths separately
+    ;;
+esac
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -287,51 +300,107 @@ with open(file, 'w') as f:
   else
     info "Claude config not found, skipping: ${CLAUDE_CONFIG}"
   fi
-fi
 
-# ── Remove shared components (when removing all or when both are gone) ─────────
-if [ "$TARGET" = "all" ]; then
-  # Remove binary directory
-  if [ -d "$BIN_DIR" ]; then
-    action "Removing binary directory: ${BIN_DIR}"
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would run: rm -rf ${BIN_DIR}"
-    else
-      rm -rf "$BIN_DIR"
-      info "Removed ${BIN_DIR}"
-    fi
+  # 3. Remove skill reference from CLAUDE.md
+  echo ""
+  action "Removing skill reference from CLAUDE.md..."
+  CLAUDE_HOME="${HOME}/.claude/CLAUDE.md"
+  INCLUDE_LINE="@skills/ilnamiqui/SKILL.md"
+  if [ "$DRY_RUN" = true ]; then
+    info "[dry-run] Would remove '${INCLUDE_LINE}' from ${CLAUDE_HOME}"
   else
-    info "Binary directory not found, skipping: ${BIN_DIR}"
-  fi
-
-  # Remove CLI symlink
-  if [ -f "$SYMLINK_PATH" ] || [ -L "$SYMLINK_PATH" ]; then
-    action "Removing CLI symlink: ${SYMLINK_PATH}"
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would run: rm -f ${SYMLINK_PATH}"
+    if [ -f "$CLAUDE_HOME" ]; then
+      if grep -Fxq "$INCLUDE_LINE" "$CLAUDE_HOME" 2>/dev/null; then
+        tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
+        grep -Fxv "$INCLUDE_LINE" "$CLAUDE_HOME" > "$tmp" 2>/dev/null || true
+        if [ -s "$tmp" ]; then
+          mv "$tmp" "$CLAUDE_HOME"
+          info "Removed skill reference from ${CLAUDE_HOME}"
+        else
+          mv "$tmp" "$CLAUDE_HOME"
+          rm -f "$CLAUDE_HOME"
+          info "Removed empty ${CLAUDE_HOME}"
+        fi
+      else
+        info "Skill reference not found in ${CLAUDE_HOME}, skipping"
+      fi
     else
-      rm -f "$SYMLINK_PATH"
-      info "Removed ${SYMLINK_PATH}"
-    fi
-  else
-    info "CLI symlink not found, skipping: ${SYMLINK_PATH}"
-  fi
-fi
-
-# Remove MCP binary when removing claude or all (but keep main binary for --target opencode only)
-if [ "$TARGET" = "claude" ]; then
-  MCP_BINARY_NAME="ilnamiqui-mcp"
-  # Find and remove MCP binary in bin dir
-  if [ -d "$BIN_DIR" ]; then
-    action "Removing MCP binary from ${BIN_DIR}"
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would remove MCP binaries from ${BIN_DIR}"
-    else
-      find "$BIN_DIR" -name "${MCP_BINARY_NAME}*" -exec rm -f {} \; 2>/dev/null || true
-      info "Removed MCP binaries from ${BIN_DIR}"
+      info "CLAUDE.md not found, skipping"
     fi
   fi
 fi
+
+# ── Remove binary directories ──────────────────────────────────────────────────
+case "$TARGET" in
+  opencode)
+    # Remove binary directory
+    if [ -d "$BIN_DIR" ]; then
+      action "Removing binary directory: ${BIN_DIR}"
+      if [ "$DRY_RUN" = true ]; then
+        info "[dry-run] Would run: rm -rf ${BIN_DIR}"
+      else
+        rm -rf "$BIN_DIR"
+        info "Removed ${BIN_DIR}"
+      fi
+    else
+      info "Binary directory not found, skipping: ${BIN_DIR}"
+    fi
+
+    # Remove CLI symlink
+    if [ -f "$SYMLINK_PATH" ] || [ -L "$SYMLINK_PATH" ]; then
+      action "Removing CLI symlink: ${SYMLINK_PATH}"
+      if [ "$DRY_RUN" = true ]; then
+        info "[dry-run] Would run: rm -f ${SYMLINK_PATH}"
+      else
+        rm -f "$SYMLINK_PATH"
+        info "Removed ${SYMLINK_PATH}"
+      fi
+    else
+      info "CLI symlink not found, skipping: ${SYMLINK_PATH}"
+    fi
+    ;;
+  claude)
+    if [ -d "$BIN_DIR" ]; then
+      action "Removing binary directory: ${BIN_DIR}"
+      if [ "$DRY_RUN" = true ]; then
+        info "[dry-run] Would run: rm -rf ${BIN_DIR}"
+      else
+        rm -rf "$BIN_DIR"
+        info "Removed ${BIN_DIR}"
+      fi
+    else
+      info "Binary directory not found, skipping: ${BIN_DIR}"
+    fi
+    ;;
+  all)
+    for dir in "${HOME}/.config/opencode/plugins/ilnamiqui" "${HOME}/.claude/plugins/ilnamiqui"; do
+      if [ -d "$dir" ]; then
+        action "Removing binary directory: ${dir}"
+        if [ "$DRY_RUN" = true ]; then
+          info "[dry-run] Would run: rm -rf ${dir}"
+        else
+          rm -rf "$dir"
+          info "Removed ${dir}"
+        fi
+      else
+        info "Binary directory not found, skipping: ${dir}"
+      fi
+    done
+
+    # Remove CLI symlink
+    if [ -f "$SYMLINK_PATH" ] || [ -L "$SYMLINK_PATH" ]; then
+      action "Removing CLI symlink: ${SYMLINK_PATH}"
+      if [ "$DRY_RUN" = true ]; then
+        info "[dry-run] Would run: rm -f ${SYMLINK_PATH}"
+      else
+        rm -f "$SYMLINK_PATH"
+        info "Removed ${SYMLINK_PATH}"
+      fi
+    else
+      info "CLI symlink not found, skipping: ${SYMLINK_PATH}"
+    fi
+    ;;
+esac
 
 # 5. Success message
 echo ""

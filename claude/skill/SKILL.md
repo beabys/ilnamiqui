@@ -1,3 +1,7 @@
+---
+description: Session memory for Claude Code — persists decisions, bugs, architecture, and context between chats using per-project SQLite. Use at chat start to load past context, during conversation to save decisions/bugs/notes, and at chat end to summarize.
+---
+
 # ilnamiqui — Session Memory for Claude Code
 
 **What:** Persists project context (decisions, bugs, architecture, notes)
