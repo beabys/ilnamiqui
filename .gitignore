@@ -17,3 +17,4 @@ Thumbs.db
 .opencode/
 coverage.out
 coverage.html
+node_modules

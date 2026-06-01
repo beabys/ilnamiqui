@@ -148,6 +148,43 @@ Every new chat picks up right where the last one left off — automatically.
 
 ---
 
+## opencode Integration
+
+The TypeScript plugin (`opencode/plugin/ilnamiqui.ts`) hooks into opencode's
+lifecycle automatically — no manual commands needed.
+
+### Automatic Lifecycle Hooks
+
+| Event | What happens |
+|-------|-------------|
+| **Session start** | Silently loads past memories from `.opencode/ilnamiqui.db` |
+| **`/exit` command** | Captures last up to 20 user messages, saves context summary via `session.deleted` event |
+| **Context compaction** | See below |
+
+### Compaction Sync
+
+When opencode's context window reaches capacity (~80-90%), it automatically
+compresses the conversation to reclaim space. ilnamiqui hooks into this in
+two places:
+
+1. **Before compaction** — the `experimental.session.compacting` hook
+   fires *before* compression begins. It captures current conversation
+   context via `buildSummary()` (files changed, decisions, task), saves
+   it as a memory entry, and injects recent memory entries into
+   the compaction prompt itself, helping the compression preserve awareness
+   of stored memories.
+2. **After compaction** — the `session.compacted` event fires once compaction
+   completes, silently reloading all memories so the AI immediately knows
+   what was stored.
+
+All automatic memory loads are silent — the AI only sees memory output when
+you explicitly use the `ilnamiqui load --pretty` command.
+
+The Go CLI binary is shared between opencode and Claude Code; the compaction
+sync is opencode-specific (plugin-based).
+
+---
+
 ## Commands
 
 | Command | Description |
