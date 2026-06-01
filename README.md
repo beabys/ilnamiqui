@@ -16,45 +16,22 @@
 
 ---
 
-**ilnamiqui** gives your AI companion persistent memory across chats. Everything is stored in a local SQLite database inside `.opencode/` — you own it, you control it. The binary itself makes zero network calls, has no telemetry, and requires no accounts.  
+**ilnamiqui** gives your AI companion persistent memory across chats. Everything is stored in a local SQLite database inside `.ilnamiqui/` — you own it, you control it. The binary itself makes zero network calls, has no telemetry, and requires no accounts.  
 Each project gets its own isolated database — no cross-project leakage.
 
 Stop losing context. Stop repeating yourself. Just remember.
 
 ---
 
-## Architecture
+## TL;DR
 
-ilnamiqui is a hexagonal system with adapters for different AI assistants:
+```bash
+# Install
+curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash
 
+# Uninstall
+curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/uninstall.sh | bash
 ```
-┌─────────────────────────────────────────────────────┐
-│                   ilnamiqui CLI                      │
-│             (shared binary — ilnamiqui)              │
-│         SQLite session memory in .opencode/          │
-└────────────────────┬────────────────────────────────┘
-                     │
-          ┌──────────┴──────────┐
-          ▼                     ▼
-┌──────────────────┐  ┌──────────────────────┐
-│   opencode       │  │    Claude Code        │
-│   adapter        │  │    adapter            │
-├──────────────────┤  ├──────────────────────┤
-│ Plugin (TS)      │  │ MCP Server (Go)       │
-│   → lifecycle    │  │   → 6 tools via      │
-│     hooks        │  │     stdio transport   │
-│ Skill (SKILL.md) │  │ Skill (CLAUDE.md)     │
-│   → teaches AI   │  │   → teaches AI to    │
-│     commands     │  │     call MCP tools    │
-└──────────────────┘  └──────────────────────┘
-```
-
-| Layer | opencode | Claude Code |
-|-------|----------|-------------|
-| **Binary** | `ilnamiqui` CLI | `ilnamiqui` CLI + `ilnamiqui-mcp` MCP server |
-| **Integration** | TypeScript plugin (lifecycle hooks) | MCP stdio server (6 tools) |
-| **AI instructions** | `opencode/skill/SKILL.md` | `claude/skill/CLAUDE.md` |
-| **Config** | `~/.config/opencode/opencode.json` | `~/.claude/claude.json` |
 
 ---
 
@@ -157,7 +134,7 @@ lifecycle automatically — no manual commands needed.
 
 | Event | What happens |
 |-------|-------------|
-| **Session start** | Silently loads past memories from `.opencode/ilnamiqui.db` |
+| **Session start** | Silently loads past memories from `.ilnamiqui/ilnamiqui.db` |
 | **`/exit` command** | Captures last up to 20 user messages, saves context summary via `session.deleted` event |
 | **Context compaction** | See below |
 
@@ -189,7 +166,7 @@ sync is opencode-specific (plugin-based).
 
 | Command | Description |
 |---------|-------------|
-| `init` | Create `.opencode/ilnamiqui.db` and run migrations |
+| `init` | Create `.ilnamiqui/ilnamiqui.db` and run migrations |
 | `save <key> <value>` | Save a memory entry for the active session |
 | `load [--session] [--limit N] [--pretty]` | Load memory entries (all or current session) |
 | `list [--limit N] [--pretty]` | List recent sessions |
@@ -210,7 +187,7 @@ The MCP server (`ilnamiqui-mcp`) provides 6 tools over stdio:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `init_memory` | _(none)_ | Initialize the database in `.opencode/` |
+| `init_memory` | _(none)_ | Initialize the database in `.ilnamiqui/` |
 | `save_memory` | `key` (required), `value` (required) | Save a memory entry |
 | `load_memories` | `limit` (opt, default 50), `session_only` (opt) | Load memory entries |
 | `search_memories` | `query` (opt), `after` (opt, RFC3339), `before` (opt, RFC3339), `limit` (opt, default 10) | Search by key, value, or date range |
@@ -221,11 +198,46 @@ The Claude Code skill (`claude/skill/CLAUDE.md`) instructs the AI to call these 
 
 ---
 
+## Architecture
+
+ilnamiqui is a hexagonal system with adapters for different AI assistants:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   ilnamiqui CLI                      │
+│             (shared binary — ilnamiqui)              │
+│         SQLite session memory in .ilnamiqui/          │
+└────────────────────┬────────────────────────────────┘
+                     │
+          ┌──────────┴──────────┐
+          ▼                     ▼
+┌──────────────────┐  ┌──────────────────────┐
+│   opencode       │  │    Claude Code        │
+│   adapter        │  │    adapter            │
+├──────────────────┤  ├──────────────────────┤
+│ Plugin (TS)      │  │ MCP Server (Go)       │
+│   → lifecycle    │  │   → 6 tools via      │
+│     hooks        │  │     stdio transport   │
+│ Skill (SKILL.md) │  │ Skill (CLAUDE.md)     │
+│   → teaches AI   │  │   → teaches AI to    │
+│     commands     │  │     call MCP tools    │
+└──────────────────┘  └──────────────────────┘
+```
+
+| Layer | opencode | Claude Code |
+|-------|----------|-------------|
+| **Binary** | `ilnamiqui` CLI | `ilnamiqui` CLI + `ilnamiqui-mcp` MCP server |
+| **Integration** | TypeScript plugin (lifecycle hooks) | MCP stdio server (6 tools) |
+| **AI instructions** | `opencode/skill/SKILL.md` | `claude/skill/CLAUDE.md` |
+| **Config** | `~/.config/opencode/opencode.json` | `~/.claude/claude.json` |
+
+---
+
 ## Privacy
 
 **Your memory is stored locally — in a file you control.** Here's what that means in practice:
 
-- **Local storage.** Every memory lives in `.opencode/ilnamiqui.db` inside your project. No cloud, no servers — just a file on your machine.
+- **Local storage.** Every memory lives in `.ilnamiqui/ilnamiqui.db` inside your project. No cloud, no servers — just a file on your machine.
 - **ilnamiqui makes zero network calls.** The binary never phones home, sends no analytics, and has no telemetry.
 - **You see everything.** The database is a plain SQLite file. Open it with any SQLite browser, inspect it, edit it, delete it — it's yours.
 - **No accounts.** No sign-up, no API keys, no user management. It just works.

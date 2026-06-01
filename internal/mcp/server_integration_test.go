@@ -54,7 +54,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	}
 
 	// Verify DB file
-	if _, err := os.Stat(dir + "/.opencode/ilnamiqui.db"); os.IsNotExist(err) {
+	if _, err := os.Stat(dir + "/.ilnamiqui/ilnamiqui.db"); os.IsNotExist(err) {
 		t.Fatal("DB file not created after init")
 	}
 

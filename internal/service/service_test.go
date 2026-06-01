@@ -17,7 +17,7 @@ func (realConfig) DBPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return d + "/.opencode/ilnamiqui.db", nil
+	return d + "/.ilnamiqui/ilnamiqui.db", nil
 }
 func (realConfig) ProjectSlug() (string, error) { return "test", nil }
 func (realConfig) FindProjectRoot() (string, error) {

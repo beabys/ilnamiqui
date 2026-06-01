@@ -78,7 +78,7 @@ func TestIntegrationInitSchema(t *testing.T) {
 
 	// Open DB directly and verify schema
 	_ = svc // we use svc.Close() already
-	dbPath := dir + "/.opencode/ilnamiqui.db"
+	dbPath := dir + "/.ilnamiqui/ilnamiqui.db"
 	// We can verify file exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Fatal("db file not created")
@@ -176,8 +176,8 @@ func TestIntegrationInitReusesExistingDir(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 	_ = os.Chdir(dir)
 
-	// Pre-create .opencode directory
-	if err := os.MkdirAll(dir+"/.opencode", 0o755); err != nil {
+	// Pre-create .ilnamiqui directory
+	if err := os.MkdirAll(dir+"/.ilnamiqui", 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +190,7 @@ func TestIntegrationInitReusesExistingDir(t *testing.T) {
 		t.Fatalf("init error with existing dir: %v", err)
 	}
 
-	if _, err := os.Stat(dir + "/.opencode/ilnamiqui.db"); os.IsNotExist(err) {
+	if _, err := os.Stat(dir + "/.ilnamiqui/ilnamiqui.db"); os.IsNotExist(err) {
 		t.Fatal("db file not created after init with existing dir")
 	}
 }

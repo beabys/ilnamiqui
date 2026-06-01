@@ -29,7 +29,7 @@ func NewHandler(svc service.Service) *Handler {
 func (h *Handler) RegisterTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("init_memory",
-			mcp.WithDescription("Initialize the ilnamiqui database in the current project. Creates the .opencode directory and runs database migrations."),
+			mcp.WithDescription("Initialize the ilnamiqui database in the current project. Creates the .ilnamiqui directory and runs database migrations."),
 		),
 		h.handleInit,
 	)
