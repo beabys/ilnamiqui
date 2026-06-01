@@ -26,19 +26,101 @@ function log(msg: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Platform → binary name resolution
+// Conversation buffer — accumulates last ~20 user messages for summary
 // ---------------------------------------------------------------------------
 
-const PLATFORM_MAP: Record<string, string> = {
-  darwin: "darwin",
-  linux: "linux",
-  win32: "windows",
+const MAX_BUFFER = 20
+
+interface BufferEntry {
+  role: string
+  text: string
+  timestamp: string
 }
 
-const ARCH_MAP: Record<string, string> = {
-  x64: "amd64",
-  arm64: "arm64",
+const conversationBuffer: BufferEntry[] = []
+
+// Guard to prevent double-save on repeated session.deleted events
+let exitSaved = false
+
+// ---------------------------------------------------------------------------
+// buildSummary — rule-based summary extraction from conversation buffer
+// ---------------------------------------------------------------------------
+
+function buildSummary(buffer: BufferEntry[]): string {
+  const now = new Date().toISOString()
+
+  if (buffer.length === 0) {
+    return [
+      "session: (empty)",
+      "state: in-progress",
+      "files: (none)",
+      "decisions: (none)",
+      `last_turn: ${now}`,
+      "entry_count: 0",
+    ].join("\n")
+  }
+
+  const last = buffer[buffer.length - 1]
+  const task = last.text.replace(/\s+/g, " ").trim().substring(0, 200)
+
+  // ── extract file paths ─────────────────────────────────────────────
+  const filePathSet = new Set<string>()
+  // Match paths like internal/db/db.go, cmd/ilnamiqui/main.go, .opencode/foo
+  const pathPatterns = [
+    /\.opencode\/[\w./-]+/g,
+    /internal\/[\w./-]+\.[a-z]+/g,
+    /cmd\/[\w./-]+\.[a-z]+/g,
+    /pkg\/[\w./-]+\.[a-z]+/g,
+    /opencode\/plugin\/[\w./-]+\.[a-z]+/g,
+    /[\w-]+\/[\w.-]+\/\w+\.[a-z]+/g,
+  ]
+  for (const entry of buffer) {
+    for (const re of pathPatterns) {
+      const matches = entry.text.match(re)
+      if (matches) {
+        for (const m of matches) {
+          filePathSet.add(m)
+        }
+      }
+    }
+  }
+  const files =
+    filePathSet.size > 0 ? Array.from(filePathSet).join(", ") : "(none)"
+
+  // ── extract decision lines ─────────────────────────────────────────
+  const decisionLines: string[] = []
+  for (const entry of buffer) {
+    const lines = entry.text.split("\n")
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (
+        /(?:^|\s)(?:use\s|chose\s|implement|refactor|migrate|fix:|add:)/i.test(
+          trimmed,
+        )
+      ) {
+        const excerpt = trimmed.substring(0, 120)
+        if (!decisionLines.includes(excerpt)) {
+          decisionLines.push(excerpt)
+        }
+      }
+    }
+  }
+  const decisions =
+    decisionLines.length > 0 ? decisionLines.join("; ") : "(none)"
+
+  return [
+    `session: ${task}`,
+    "state: in-progress",
+    `files: ${files}`,
+    `decisions: ${decisions}`,
+    `last_turn: ${last.timestamp}`,
+    `entry_count: ${buffer.length}`,
+  ].join("\n")
 }
+
+// ---------------------------------------------------------------------------
+// Platform → binary name resolution
+// ---------------------------------------------------------------------------
 
 /**
  * Resolve the platform-specific binary path inside the opencode plugin
@@ -48,17 +130,36 @@ const ARCH_MAP: Record<string, string> = {
  * Falls back to bare `ilnamiqui` if the platform-specific binary is missing
  * (handles dev installs via `go install`).
  */
-function resolveBinaryPath(): {
-  path: string
-  name: string
-} {
-  const platform = PLATFORM_MAP[process.platform] || process.platform
-  const arch = ARCH_MAP[process.arch] || process.arch
-  const ext = platform === "windows" ? ".exe" : ""
-  const name = `ilnamiqui-${platform}-${arch}${ext}`
-  return {
-    path: path.join(os.homedir(), ".config", "opencode", "plugins", "ilnamiqui", name),
+function resolveBinaryPath(): string {
+  const p = process.platform === "win32" ? "windows" : process.platform
+  const ext = p === "windows" ? ".exe" : ""
+  const name = `ilnamiqui-${p}-${process.arch}${ext}`
+  return path.join(
+    os.homedir(),
+    ".config",
+    "opencode",
+    "plugins",
+    "ilnamiqui",
     name,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Binary finder
+// ---------------------------------------------------------------------------
+
+async function findBinary($: any, platformPath: string): Promise<string | null> {
+  try {
+    await $`test -x ${platformPath}`.quiet()
+    return platformPath
+  } catch {
+    /* fall through */
+  }
+  try {
+    await $`which ilnamiqui`.quiet()
+    return "ilnamiqui"
+  } catch {
+    return null
   }
 }
 
@@ -70,31 +171,34 @@ const plugin: Plugin = async ({ $ }) => {
   const resolved = resolveBinaryPath()
   let sessionContextLoaded = false
 
-  // Try platform-specific binary first, then bare name (dev installs)
-  const binary = await (async (): Promise<string | null> => {
-    try {
-      await $`test -x ${resolved.path}`.quiet()
-      return resolved.path
-    } catch {
-      // not found at platform path — try PATH
-    }
-    try {
-      await $`which ilnamiqui`.quiet()
-      return "ilnamiqui"
-    } catch {
-      // not in PATH either — plugin is unusable
-      return null
-    }
-  })()
+  const binary = await findBinary($, resolved)
 
   if (!binary) {
     log(
-      `binary not found (tried ${resolved.name} and PATH) — plugin disabled`,
+      `binary not found (tried ${path.basename(resolved)} and PATH) — plugin disabled`,
     )
     return {}
   }
 
   log(`binary found: ${binary}`)
+
+  // ----- Register chat.message hook to buffer user messages -----
+  const chatMessageHook = async (_input: unknown, output: { parts: Array<{ type: string; text?: string }> }) => {
+    const textPart = output.parts.find(
+      (p): p is { type: string; text: string } => p.type === "text" && typeof p.text === "string",
+    )
+    if (textPart && textPart.text) {
+      const entry: BufferEntry = {
+        role: "user",
+        text: textPart.text,
+        timestamp: new Date().toISOString(),
+      }
+      conversationBuffer.push(entry)
+      if (conversationBuffer.length > MAX_BUFFER) {
+        conversationBuffer.shift()
+      }
+    }
+  }
 
   // ----- Event hooks -----
   return {
@@ -109,31 +213,59 @@ const plugin: Plugin = async ({ $ }) => {
           if (sessionContextLoaded) return
           sessionContextLoaded = true
           log("session.start — loading context")
-          await $`${binary} load --pretty --limit 50`.nothrow()
+          await $`${binary} load --limit 50`.quiet().nothrow()
           return
         }
 
-        // session.end — persist session data
-        if (type === "session.end" || name === "session.end") {
-          log("session.end — saving session")
-          await $`${binary} session end --summary "session ended"`.quiet().nothrow()
+        // session.compacted — save memory entry + reload after compaction
+        if (type === "session.compacted") {
+          log("session.compacted — saving entry and reloading memories")
+          await $`${binary} save "compact" "compaction completed at ${new Date().toISOString()}"`.quiet().nothrow()
+          await $`${binary} load --limit 50`.quiet().nothrow()
           return
         }
 
-        // chat.message — detect /exit command
-        if (type === "chat.message" || name === "chat.message") {
-          const content = typeof ev?.content === "string" ? ev.content : ""
-          if (content.trim() === "/exit") {
-            log("/exit — saving session")
-            await $`${binary} session end --summary "session ended"`.quiet().nothrow()
-          }
+        // session.deleted — user typed /exit or session ended
+        if (type === "session.deleted" || name === "session.deleted") {
+          if (exitSaved) return
+
+          log("session.deleted — saving context")
+          const summary = buildSummary(conversationBuffer)
+          await $`${binary} save "session" ${summary}`.quiet().nothrow()
+          await $`${binary} session end --summary ${summary}`.quiet().nothrow()
+          exitSaved = true
           return
         }
       } catch (e) {
         log(`event error: ${e}`)
       }
     },
+
+    // Save memory entry + inject memory context into compaction prompt
+    "experimental.session.compacting": async (_input: unknown, output: { context?: string[] }) => {
+      log("session.compacting — saving pre-compaction entry")
+      const summary = buildSummary(conversationBuffer)
+      await $`${binary} save "compact" ${summary}`.quiet().nothrow()
+      log("session.compacting — injecting memory context")
+      const result = await $`${binary} load --limit 10 --pretty`.quiet().nothrow()
+      if (result.exitCode === 0 && result.stdout) {
+        output.context = [
+          "Recent session memory entries (ilnamiqui):",
+          String(result.stdout).trim(),
+        ]
+      }
+    },
+
+    // Buffer user messages (no longer detects /exit — handled by session.deleted)
+    "chat.message": chatMessageHook,
   }
+}
+
+export { buildSummary, conversationBuffer, exitSaved, BufferEntry }
+
+export function resetTestState(): void {
+  conversationBuffer.length = 0
+  exitSaved = false
 }
 
 export default plugin

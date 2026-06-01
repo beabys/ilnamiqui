@@ -98,7 +98,7 @@ else
 fi
 
 # TEMPORARY: force opencode until claude target is finalized — remove this line to re-enable --target flag
-TARGET="opencode"
+# TARGET="opencode"
 
 # ─── Resolve version ──────────────────────────────────────────────────────────
 if [ -z "$VERSION" ]; then
