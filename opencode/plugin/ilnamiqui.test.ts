@@ -71,12 +71,13 @@ describe("buildSummary", () => {
 
   it("extracts file paths from messages", () => {
     const buf = [
-      makeEntry("look at internal/db/db.go and fix cmd/ilnamiqui/main.go"),
+      makeEntry("look at internal/db/db.go and fix cmd/ilnamiqui/main.go, also src/components/Button.tsx"),
     ]
     const summary = buildSummary(buf)
     expect(summary).toContain("internal/db/db.go")
     expect(summary).toContain("cmd/ilnamiqui/main.go")
-    expect(summary).toContain("files: internal/db/db.go, cmd/ilnamiqui/main.go")
+    expect(summary).toContain("src/components/Button.tsx")
+    expect(summary).toContain("files: internal/db/db.go, cmd/ilnamiqui/main.go, src/components/Button.tsx")
   })
 
   it("extracts .opencode paths", () => {
@@ -91,9 +92,51 @@ describe("buildSummary", () => {
   it("extracts opencode/plugin paths", () => {
     const buf = [
       makeEntry("modify opencode/plugin/ilnamiqui.ts"),
+      makeEntry("update .config/app.yaml"),
     ]
     const summary = buildSummary(buf)
     expect(summary).toContain("opencode/plugin/ilnamiqui.ts")
+    expect(summary).toContain(".config/app.yaml")
+  })
+
+  it("extracts paths from any language project", () => {
+    const buf = [
+      makeEntry("fix api/routes.py and lib/utils.js"),
+      makeEntry("update src/main.rs"),
+      makeEntry("add tests/test_auth.py"),
+    ]
+    const summary = buildSummary(buf)
+    expect(summary).toContain("api/routes.py")
+    expect(summary).toContain("lib/utils.js")
+    expect(summary).toContain("src/main.rs")
+    expect(summary).toContain("tests/test_auth.py")
+  })
+
+  it("extracts config paths with dot dirs", () => {
+    const buf = [
+      makeEntry("edit .opencode/settings.json"),
+      makeEntry("update .config/app.yaml"),
+    ]
+    const summary = buildSummary(buf)
+    expect(summary).toContain(".opencode/settings.json")
+    expect(summary).toContain(".config/app.yaml")
+  })
+
+  it("extracts multi-level paths", () => {
+    const buf = [
+      makeEntry("deep path a/b/c/d/file.ext"),
+    ]
+    const summary = buildSummary(buf)
+    expect(summary).toContain("a/b/c/d/file.ext")
+  })
+
+  it("ignores bare filenames without directory", () => {
+    const buf = [
+      makeEntry("check README.md and go.mod"),
+    ]
+    const summary = buildSummary(buf)
+    const filesLine = summary.split("\n").find(l => l.startsWith("files:"))
+    expect(filesLine).toBe("files: (none)")
   })
 
   // -----------------------------------------------------------------------

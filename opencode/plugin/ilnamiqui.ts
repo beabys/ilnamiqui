@@ -65,14 +65,9 @@ function buildSummary(buffer: BufferEntry[]): string {
 
   // ── extract file paths ─────────────────────────────────────────────
   const filePathSet = new Set<string>()
-  // Match paths like internal/db/db.go, cmd/ilnamiqui/main.go, .opencode/foo
+  // Match any path with directory + filename.ext
   const pathPatterns = [
-    /\.opencode\/[\w./-]+/g,
-    /internal\/[\w./-]+\.[a-z]+/g,
-    /cmd\/[\w./-]+\.[a-z]+/g,
-    /pkg\/[\w./-]+\.[a-z]+/g,
-    /opencode\/plugin\/[\w./-]+\.[a-z]+/g,
-    /[\w-]+\/[\w.-]+\/\w+\.[a-z]+/g,
+    /(?:[\w.-]+\/)+[\w.-]+\.[a-z]+/g,
   ]
   for (const entry of buffer) {
     for (const re of pathPatterns) {

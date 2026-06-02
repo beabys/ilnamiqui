@@ -73,6 +73,7 @@ describe("buffer accumulation", () => {
       "fix: connection pool exhausted",
       "add: automatic retry in cmd/ilnamiqui/main.go",
       "chose pgx over database/sql",
+      "also update src/components/Button.tsx",
     ]
     for (const msg of messages) {
       conversationBuffer.push({
@@ -83,14 +84,15 @@ describe("buffer accumulation", () => {
     }
 
     const summary = buildSummary(conversationBuffer)
-    expect(summary).toContain("session: chose pgx over database/sql") // last msg
+    expect(summary).toContain("session: also update src/components/Button.tsx") // last msg
     expect(summary).toContain("internal/db/db.go")
     expect(summary).toContain("cmd/ilnamiqui/main.go")
+    expect(summary).toContain("src/components/Button.tsx")
     expect(summary).toContain("use sqlc")
     expect(summary).toContain("fix:")
     expect(summary).toContain("add:")
     expect(summary).toContain("chose")
-    expect(summary).toContain("entry_count: 5")
+    expect(summary).toContain("entry_count: 6")
   })
 
   it("buffer does not exceed 20 entries", () => {
