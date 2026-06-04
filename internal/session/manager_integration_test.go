@@ -43,6 +43,7 @@ func fileDB(t *testing.T) *sql.DB {
 	CREATE TABLE IF NOT EXISTS sessions (
 		id         TEXT PRIMARY KEY,
 		project    TEXT NOT NULL,
+		agent      TEXT NOT NULL DEFAULT 'opencode',
 		started_at TEXT NOT NULL,
 		ended_at   TEXT,
 		summary    TEXT DEFAULT '',
@@ -65,13 +66,13 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	// Start a session
-	sess, err := mgr.StartSession(ctx, "integration-project")
+	sess, err := mgr.StartSession(ctx, "integration-project", "opencode")
 	if err != nil {
 		t.Fatalf("StartSession error: %v", err)
 	}
 
 	// Verify it's active
-	active, err := mgr.GetActiveSession(ctx, "integration-project")
+	active, err := mgr.GetActiveSession(ctx, "integration-project", "")
 	if err != nil {
 		t.Fatalf("GetActiveSession error: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestIntegrationMultipleSessionsConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			sess, err := mgr.StartSession(ctx, "concurrent-project")
+			sess, err := mgr.StartSession(ctx, "concurrent-project", "")
 			if err != nil {
 				errCh <- err
 				return
@@ -165,6 +166,7 @@ func TestIntegrationActiveSessionPersistence(t *testing.T) {
 	CREATE TABLE IF NOT EXISTS sessions (
 		id         TEXT PRIMARY KEY,
 		project    TEXT NOT NULL,
+		agent      TEXT NOT NULL DEFAULT 'opencode',
 		started_at TEXT NOT NULL,
 		ended_at   TEXT,
 		summary    TEXT DEFAULT '',
@@ -175,7 +177,7 @@ func TestIntegrationActiveSessionPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr1 := NewManager(db1)
-	sess, err := mgr1.StartSession(context.Background(), "persist-project")
+	sess, err := mgr1.StartSession(context.Background(), "persist-project", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +190,114 @@ func TestIntegrationActiveSessionPersistence(t *testing.T) {
 	}
 	defer db2.Close()
 	mgr2 := NewManager(db2)
-	active, err := mgr2.GetActiveSession(context.Background(), "persist-project")
+	active, err := mgr2.GetActiveSession(context.Background(), "persist-project", "")
 	if err != nil {
 		t.Fatalf("GetActiveSession error: %v", err)
 	}
 	if active.ID != sess.ID {
 		t.Fatalf("expected persisted session %q, got %q", sess.ID, active.ID)
+	}
+}
+
+func TestIntegrationAgent_Isolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	db := fileDB(t)
+	mgr := NewManager(db)
+	ctx := context.Background()
+
+	// Start session A (opencode) and session B (claude-code) — both active
+	sessA, err := mgr.StartSession(ctx, "agent-project", AgentOpencode)
+	if err != nil {
+		t.Fatalf("StartSession opencode: %v", err)
+	}
+	sessB, err := mgr.StartSession(ctx, "agent-project", AgentClaudeCode)
+	if err != nil {
+		t.Fatalf("StartSession claude-code: %v", err)
+	}
+
+	// Both should be active
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM sessions WHERE project = 'agent-project' AND ended_at IS NULL").Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 active sessions, got %d", count)
+	}
+
+	// CloseSessionsByAgent for opencode — only opencode sessions closed
+	if err := mgr.CloseSessionsByAgent(ctx, "agent-project", AgentOpencode); err != nil {
+		t.Fatalf("CloseSessionsByAgent: %v", err)
+	}
+
+	// Verify only opencode session is closed
+	var aEnded *string
+	err = db.QueryRow("SELECT ended_at FROM sessions WHERE id = ?", sessA.ID).Scan(&aEnded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aEnded == nil {
+		t.Fatal("expected opencode session to be closed")
+	}
+
+	var bEnded *string
+	err = db.QueryRow("SELECT ended_at FROM sessions WHERE id = ?", sessB.ID).Scan(&bEnded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bEnded != nil {
+		t.Fatal("expected claude-code session to still be active")
+	}
+
+	// GetActiveSession for opencode should create a new one
+	sessC, err := mgr.GetActiveSession(ctx, "agent-project", AgentOpencode)
+	if err != nil {
+		t.Fatalf("GetActiveSession for opencode: %v", err)
+	}
+	if sessC.ID == sessA.ID {
+		t.Fatal("expected new session for opencode, not the closed one")
+	}
+	if sessC.Agent != AgentOpencode {
+		t.Fatalf("expected agent 'opencode', got %q", sessC.Agent)
+	}
+}
+
+func TestIntegrationGetActiveSession_byAgent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	db := fileDB(t)
+	mgr := NewManager(db)
+	ctx := context.Background()
+
+	// Start a session for opencode
+	sessOpen, err := mgr.StartSession(ctx, "multi-agent-project", AgentOpencode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// GetActiveSession for opencode returns existing
+	active, err := mgr.GetActiveSession(ctx, "multi-agent-project", AgentOpencode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.ID != sessOpen.ID {
+		t.Fatalf("expected opencode session %q, got %q", sessOpen.ID, active.ID)
+	}
+
+	// GetActiveSession for claude-code creates new (no active session for that agent)
+	activeCC, err := mgr.GetActiveSession(ctx, "multi-agent-project", AgentClaudeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activeCC.ID == sessOpen.ID {
+		t.Fatal("expected different session for claude-code")
+	}
+	if activeCC.Agent != AgentClaudeCode {
+		t.Fatalf("expected claude-code agent, got %q", activeCC.Agent)
 	}
 }

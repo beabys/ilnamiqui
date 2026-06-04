@@ -29,8 +29,13 @@ import (
 //
 // ────────────────────────────────────────────────────────────────────────────
 
-// version1 is immutable. Never edit existing versions — only append new ones.
+// versions are immutable. Never edit existing versions — only append new ones.
 // Each version must be idempotent (CREATE IF NOT EXISTS).
+
+const version2 = `
+ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'opencode';
+UPDATE sessions SET agent = '_system' WHERE id = '00000000-0000-0000-0000-000000000000';
+`
 const version1 = `
 CREATE TABLE IF NOT EXISTS schema_versions (
     version     INTEGER PRIMARY KEY,
@@ -109,6 +114,10 @@ var migrations = []migration{
 		sql:  version1,
 		desc: "initial schema (sessions, memory_entries, memory_fts, memory_keys, triggers, indexes)",
 	},
+	{
+		sql:  version2,
+		desc: "add agent column to sessions",
+	},
 }
 
 // LatestVersion returns the latest schema version, derived from the number of
@@ -170,11 +179,17 @@ func runPostMigrationV(v int, db *sql.DB) error {
 	switch v {
 	case 1:
 		return runPostMigrationV1(db)
-	// Add new versions here:
-	// case 2: return runPostMigrationV2(db)
+	case 2:
+		return runPostMigrationV2(db)
 	default:
 		return nil
 	}
+}
+
+func runPostMigrationV2(db *sql.DB) error {
+	// No post-tasks for v2 yet. Placeholder for future use.
+	_ = db
+	return nil
 }
 
 func runPostMigrationV1(db *sql.DB) error {

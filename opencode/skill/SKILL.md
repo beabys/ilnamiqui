@@ -21,6 +21,20 @@ new info), and on `/exit` (auto-saved).
 (auto-load/auto-save hooks), and this skill (teaches you when/how to
 use the commands).
 
+## Agent identity
+
+Every session is tagged with an agent identifier (`opencode` or `claude-code`).
+The plugin passes `--agent opencode` automatically on all operations.
+If you run CLI commands manually, include the flag:
+
+```bash
+ilnamiqui save --agent opencode "key" "value"
+ilnamiqui session start --agent opencode
+ilnamiqui session end --agent opencode --summary "done"
+```
+
+Omitting `--agent` defaults to `opencode`.
+
 ---
 
 ## Setup
@@ -71,13 +85,13 @@ Save whenever notable context appears:
 
 | Trigger | Command |
 |---|---|
-| Architecture decision | `ilnamiqui save "architecture" "<decision>"` |
-| Bug found + fix | `ilnamiqui save "bug" "<root cause and fix>"` |
-| Blocked / incomplete work | `ilnamiqui save "blocked" "<what was tried>"` |
-| File created | `ilnamiqui save "file" "<path> — <what it does>"` |
-| Config change | `ilnamiqui save "config" "<what changed>"` |
-| External dependency | `ilnamiqui save "dependency" "<package/tool>"` |
-| General note | `ilnamiqui save "<key>" "<value>"` |
+| Architecture decision | `ilnamiqui save --agent opencode "architecture" "<decision>"` |
+| Bug found + fix | `ilnamiqui save --agent opencode "bug" "<root cause and fix>"` |
+| Blocked / incomplete work | `ilnamiqui save --agent opencode "blocked" "<what was tried>"` |
+| File created | `ilnamiqui save --agent opencode "file" "<path> — <what it does>"` |
+| Config change | `ilnamiqui save --agent opencode "config" "<what changed>"` |
+| External dependency | `ilnamiqui save --agent opencode "dependency" "<package/tool>"` |
+| General note | `ilnamiqui save --agent opencode "<key>" "<value>"` |
 
 Keep values terse (one sentence). Same key appends.
 
@@ -160,5 +174,5 @@ ilnamiqui prune --before 2026-04-01                  # safe — skips critical k
 Auto-saved by the plugin. Manual fallback:
 
 ```bash
-ilnamiqui session end --summary "<session summary>"
+ilnamiqui session end --agent opencode --summary "<session summary>"
 ```

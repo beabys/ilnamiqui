@@ -475,10 +475,10 @@ with open(file, 'w') as f:
         tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
         jq --arg ss "$SESSION_START_CMD" --arg pc "$PRECOMPACT_CMD" --arg poc "$POSTCOMPACT_CMD" --arg se "$SESSION_END_CMD" '
           .hooks //= {} |
-          .hooks["SessionStart"] = [{"hooks": [{"type": "command", "command": $ss}]}] |
+          .hooks["SessionStart"] = [{"matcher": "startup|resume", "hooks": [{"type": "command", "command": $ss}]}] |
           .hooks["PreCompact"] = [{"hooks": [{"type": "command", "command": $pc}]}] |
           .hooks["PostCompact"] = [{"hooks": [{"type": "command", "command": $poc}]}] |
-          .hooks["SessionEnd"] = [{"hooks": [{"type": "command", "command": $se, "timeout": 5}]}]
+          .hooks["SessionEnd"] = [{"hooks": [{"type": "command", "command": $se, "timeout": 15}]}]
         ' "$CLAUDE_SETTINGS" > "$tmp" 2>/dev/null && mv "$tmp" "$CLAUDE_SETTINGS" || {
           rm -f "$tmp"
           error "jq failed to update ${CLAUDE_SETTINGS}"
@@ -495,10 +495,10 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     data = {}
 data['hooks'] = data.get('hooks', {})
-data['hooks']['SessionStart'] = [{'hooks': [{'type': 'command', 'command': '${SESSION_START_CMD}'}]}]
+data['hooks']['SessionStart'] = [{'matcher': 'startup|resume', 'hooks': [{'type': 'command', 'command': '${SESSION_START_CMD}'}]}]
 data['hooks']['PreCompact'] = [{'hooks': [{'type': 'command', 'command': '${PRECOMPACT_CMD}'}]}]
 data['hooks']['PostCompact'] = [{'hooks': [{'type': 'command', 'command': '${POSTCOMPACT_CMD}'}]}]
-data['hooks']['SessionEnd'] = [{'hooks': [{'type': 'command', 'command': '${SESSION_END_CMD}', 'timeout': 5}]}]
+data['hooks']['SessionEnd'] = [{'hooks': [{'type': 'command', 'command': '${SESSION_END_CMD}', 'timeout': 15}]}]
 with open(file, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')

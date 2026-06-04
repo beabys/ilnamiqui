@@ -50,5 +50,5 @@ decisions: $DECISIONS
 last_turn: $TS
 entry_count: $ENTRY_COUNT"
 
-ilnamiqui save "compact" "$SUMMARY" 2>/dev/null || true
+ilnamiqui save --agent claude-code "compact" "$SUMMARY" 2>/dev/null || true
 exit 0

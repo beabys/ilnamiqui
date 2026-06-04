@@ -185,26 +185,27 @@ func TestRunMigrations_Versioning(t *testing.T) {
 		t.Fatalf("first RunMigrations: %v", err)
 	}
 
-	// Verify schema_versions has version 1
+	// Verify latest schema version matches LatestVersion()
 	var version int
 	var desc string
 	err = d.SQLDB().QueryRow("SELECT version, description FROM schema_versions ORDER BY version DESC LIMIT 1").Scan(&version, &desc)
 	if err != nil {
 		t.Fatalf("query schema_versions: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("expected version 1, got %d", version)
+	expected := LatestVersion()
+	if version != expected {
+		t.Fatalf("expected version %d, got %d", expected, version)
 	}
 
-	// Second run: should skip (version already applied)
+	// Second run: should skip (versions already applied)
 	if err := RunMigrations(d.SQLDB()); err != nil {
 		t.Fatalf("second RunMigrations: %v", err)
 	}
 
-	// Verify only one version record
+	// Verify correct number of version records
 	var count int
 	_ = d.SQLDB().QueryRow("SELECT COUNT(*) FROM schema_versions").Scan(&count)
-	if count != 1 {
-		t.Fatalf("expected 1 version record, got %d", count)
+	if count != expected {
+		t.Fatalf("expected %d version records, got %d", expected, count)
 	}
 }

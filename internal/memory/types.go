@@ -14,6 +14,7 @@ type Store struct {
 type Session struct {
 	ID        string     `json:"id"`
 	Project   string     `json:"project"`
+	Agent     string     `json:"agent"`
 	StartedAt time.Time  `json:"started_at"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 	Summary   string     `json:"summary"`
