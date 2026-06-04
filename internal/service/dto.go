@@ -12,6 +12,7 @@ type InitResponse struct{ DBPath string }
 type SaveRequest struct {
 	Key   string
 	Value string
+	Agent string
 }
 type SaveResponse struct {
 	Entry *memory.MemoryEntry
@@ -48,13 +49,16 @@ type DeleteRequest struct {
 }
 type DeleteResponse struct{}
 
-type StartSessionRequest struct{}
+type StartSessionRequest struct {
+	Agent string
+}
 type StartSessionResponse struct {
 	Session *memory.Session
 }
 
 type EndSessionRequest struct {
 	Summary string
+	Agent   string
 }
 type EndSessionResponse struct {
 	Session *memory.Session

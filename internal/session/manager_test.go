@@ -29,6 +29,7 @@ func openTestDB(t *testing.T) *sql.DB {
 	CREATE TABLE IF NOT EXISTS sessions (
 		id         TEXT PRIMARY KEY,
 		project    TEXT NOT NULL,
+		agent      TEXT NOT NULL DEFAULT 'opencode',
 		started_at TEXT NOT NULL,
 		ended_at   TEXT,
 		summary    TEXT DEFAULT '',
@@ -46,7 +47,7 @@ func TestStartSession(t *testing.T) {
 	mgr := NewManager(db)
 	ctx := context.Background()
 
-	sess, err := mgr.StartSession(ctx, "test-project")
+	sess, err := mgr.StartSession(ctx, "test-project", "opencode")
 	if err != nil {
 		t.Fatalf("StartSession error: %v", err)
 	}
@@ -57,6 +58,9 @@ func TestStartSession(t *testing.T) {
 	if sess.Project != "test-project" {
 		t.Fatalf("expected project 'test-project', got %q", sess.Project)
 	}
+	if sess.Agent != "opencode" {
+		t.Fatalf("expected agent 'opencode', got %q", sess.Agent)
+	}
 	if sess.StartedAt.IsZero() {
 		t.Fatal("expected non-zero started_at")
 	}
@@ -65,12 +69,37 @@ func TestStartSession(t *testing.T) {
 	}
 }
 
+func TestStartSession_withAgent(t *testing.T) {
+	db := openTestDB(t)
+	mgr := NewManager(db)
+	ctx := context.Background()
+
+	sess, err := mgr.StartSession(ctx, "test-project", "claude-code")
+	if err != nil {
+		t.Fatalf("StartSession error: %v", err)
+	}
+
+	if sess.Agent != "claude-code" {
+		t.Fatalf("expected agent 'claude-code', got %q", sess.Agent)
+	}
+
+	// Verify by querying DB directly
+	var agent string
+	err = db.QueryRow("SELECT agent FROM sessions WHERE id = ?", sess.ID).Scan(&agent)
+	if err != nil {
+		t.Fatalf("query agent: %v", err)
+	}
+	if agent != "claude-code" {
+		t.Fatalf("expected stored agent 'claude-code', got %q", agent)
+	}
+}
+
 func TestEndSession(t *testing.T) {
 	db := openTestDB(t)
 	mgr := NewManager(db)
 	ctx := context.Background()
 
-	sess, err := mgr.StartSession(ctx, "test-project")
+	sess, err := mgr.StartSession(ctx, "test-project", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +141,7 @@ func TestGetActiveSession_createsNew(t *testing.T) {
 	ctx := context.Background()
 
 	// No sessions exist — GetActiveSession should create one
-	sess, err := mgr.GetActiveSession(ctx, "test-project")
+	sess, err := mgr.GetActiveSession(ctx, "test-project", "")
 	if err != nil {
 		t.Fatalf("GetActiveSession error: %v", err)
 	}
@@ -131,13 +160,13 @@ func TestGetActiveSession_returnsExisting(t *testing.T) {
 	ctx := context.Background()
 
 	// Start a session explicitly
-	sess1, err := mgr.StartSession(ctx, "test-project")
+	sess1, err := mgr.StartSession(ctx, "test-project", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// GetActiveSession should return the same active session
-	sess2, err := mgr.GetActiveSession(ctx, "test-project")
+	sess2, err := mgr.GetActiveSession(ctx, "test-project", "")
 	if err != nil {
 		t.Fatalf("GetActiveSession error: %v", err)
 	}
@@ -153,7 +182,7 @@ func TestGetActiveSession_endsThenCreates(t *testing.T) {
 	ctx := context.Background()
 
 	// Start and end a session
-	sess1, err := mgr.StartSession(ctx, "test-project")
+	sess1, err := mgr.StartSession(ctx, "test-project", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,13 +191,97 @@ func TestGetActiveSession_endsThenCreates(t *testing.T) {
 	}
 
 	// GetActiveSession should create a new one
-	sess2, err := mgr.GetActiveSession(ctx, "test-project")
+	sess2, err := mgr.GetActiveSession(ctx, "test-project", "")
 	if err != nil {
 		t.Fatalf("GetActiveSession error: %v", err)
 	}
 
 	if sess1.ID == sess2.ID {
 		t.Fatal("expected different session ID after ending previous")
+	}
+}
+
+func TestGetActiveSession_byAgent(t *testing.T) {
+	db := openTestDB(t)
+	mgr := NewManager(db)
+	ctx := context.Background()
+
+	// Create session for agent A
+	sessA, err := mgr.StartSession(ctx, "test-project", "agent-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// GetActiveSession for agent A should return it
+	activeA, err := mgr.GetActiveSession(ctx, "test-project", "agent-a")
+	if err != nil {
+		t.Fatalf("GetActiveSession for agent-a: %v", err)
+	}
+	if activeA.ID != sessA.ID {
+		t.Fatalf("expected session %q for agent-a, got %q", sessA.ID, activeA.ID)
+	}
+
+	// GetActiveSession for agent B should create new (no active session for agent B)
+	activeB, err := mgr.GetActiveSession(ctx, "test-project", "agent-b")
+	if err != nil {
+		t.Fatalf("GetActiveSession for agent-b: %v", err)
+	}
+	if activeB.ID == sessA.ID {
+		t.Fatal("expected different session for agent-b")
+	}
+	if activeB.Agent != "agent-b" {
+		t.Fatalf("expected agent 'agent-b', got %q", activeB.Agent)
+	}
+}
+
+func TestCloseSessionsByAgent(t *testing.T) {
+	db := openTestDB(t)
+	mgr := NewManager(db)
+	ctx := context.Background()
+
+	// Create sessions for different agents
+	sess1, err := mgr.StartSession(ctx, "test-project", "agent-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess2, err := mgr.StartSession(ctx, "test-project", "agent-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Close sessions for agent-a
+	if err := mgr.CloseSessionsByAgent(ctx, "test-project", "agent-a"); err != nil {
+		t.Fatalf("CloseSessionsByAgent: %v", err)
+	}
+
+	// Verify sess1 (agent-a) is closed
+	var endedAt1 *string
+	err = db.QueryRow("SELECT ended_at FROM sessions WHERE id = ?", sess1.ID).Scan(&endedAt1)
+	if err != nil {
+		t.Fatalf("query sess1: %v", err)
+	}
+	if endedAt1 == nil {
+		t.Fatal("expected sess1 to be closed (agent-a)")
+	}
+
+	// Verify sess2 (agent-b) is still active
+	var endedAt2 *string
+	err = db.QueryRow("SELECT ended_at FROM sessions WHERE id = ?", sess2.ID).Scan(&endedAt2)
+	if err != nil {
+		t.Fatalf("query sess2: %v", err)
+	}
+	if endedAt2 != nil {
+		t.Fatal("expected sess2 to still be active (agent-b)")
+	}
+
+	// Verify summary was set
+	var summary string
+	err = db.QueryRow("SELECT summary FROM sessions WHERE id = ?", sess1.ID).Scan(&summary)
+	if err != nil {
+		t.Fatalf("query summary: %v", err)
+	}
+	if summary != "auto-closed by new session" {
+		t.Fatalf("expected 'auto-closed by new session', got %q", summary)
 	}
 }
 
@@ -179,7 +292,7 @@ func TestListSessions(t *testing.T) {
 
 	// Create multiple sessions
 	for i := 0; i < 5; i++ {
-		sess, err := mgr.StartSession(ctx, "test-project")
+		sess, err := mgr.StartSession(ctx, "test-project", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +323,7 @@ func TestListSessions_limit(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		sess, err := mgr.StartSession(ctx, "test-project")
+		sess, err := mgr.StartSession(ctx, "test-project", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,7 +359,7 @@ func TestListSessions_defaultLimit(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 15; i++ {
-		sess, err := mgr.StartSession(ctx, "test-project")
+		sess, err := mgr.StartSession(ctx, "test-project", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -268,17 +381,17 @@ func TestMultipleProjects(t *testing.T) {
 	mgr := NewManager(db)
 	ctx := context.Background()
 
-	sess1, err := mgr.StartSession(ctx, "project-a")
+	sess1, err := mgr.StartSession(ctx, "project-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess2, err := mgr.StartSession(ctx, "project-b")
+	sess2, err := mgr.StartSession(ctx, "project-b", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// GetActiveSession should return correct project
-	activeA, err := mgr.GetActiveSession(ctx, "project-a")
+	activeA, err := mgr.GetActiveSession(ctx, "project-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +399,7 @@ func TestMultipleProjects(t *testing.T) {
 		t.Fatalf("expected session for project-a, got %q", activeA.ID)
 	}
 
-	activeB, err := mgr.GetActiveSession(ctx, "project-b")
+	activeB, err := mgr.GetActiveSession(ctx, "project-b", "")
 	if err != nil {
 		t.Fatal(err)
 	}

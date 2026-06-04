@@ -39,7 +39,8 @@ interface BufferEntry {
 
 const conversationBuffer: BufferEntry[] = []
 
-// Guard to prevent double-save on repeated session.deleted events
+// Guard to prevent double-save on repeated session.created/deleted events
+let sessionInitialized = false
 let exitSaved = false
 
 // ---------------------------------------------------------------------------
@@ -164,7 +165,6 @@ async function findBinary($: any, platformPath: string): Promise<string | null> 
 
 const plugin: Plugin = async ({ $ }) => {
   const resolved = resolveBinaryPath()
-  let sessionContextLoaded = false
 
   const binary = await findBinary($, resolved)
 
@@ -197,17 +197,23 @@ const plugin: Plugin = async ({ $ }) => {
 
   // ----- Event hooks -----
   return {
-    event: async (event: unknown) => {
+    event: async (input: unknown) => {
       try {
-        const ev = event as Record<string, unknown>
+        // Handle both bare Event and { event: Event } calling conventions
+        const raw = (input as Record<string, unknown>)?.event ?? input
+        const ev = raw as Record<string, unknown>
         const type = typeof ev?.type === "string" ? ev.type : ""
         const name = typeof ev?.name === "string" ? ev.name : ""
 
-        // session.start — load previous context
-        if (type === "session.start" || name === "session.start") {
-          if (sessionContextLoaded) return
-          sessionContextLoaded = true
-          log("session.start — loading context")
+        // session.created — start opencode session + load previous context
+        // Matches both regular (session.created) and sync (session.created.1) variants
+        const isCreated = type === "session.created" || name.startsWith("session.created")
+        if (isCreated) {
+          if (sessionInitialized) return
+          sessionInitialized = true
+          log("session.created — starting session and loading context")
+          // Start session (closes old opencode sessions) then load context
+          await $`${binary} session start --agent opencode`.quiet().nothrow()
           await $`${binary} load --limit 50`.quiet().nothrow()
           return
         }
@@ -215,19 +221,21 @@ const plugin: Plugin = async ({ $ }) => {
         // session.compacted — save memory entry + reload after compaction
         if (type === "session.compacted") {
           log("session.compacted — saving entry and reloading memories")
-          await $`${binary} save "compact" "compaction completed at ${new Date().toISOString()}"`.quiet().nothrow()
+          await $`${binary} save --agent opencode "compact" "compaction completed at ${new Date().toISOString()}"`.quiet().nothrow()
           await $`${binary} load --limit 50`.quiet().nothrow()
           return
         }
 
         // session.deleted — user typed /exit or session ended
-        if (type === "session.deleted" || name === "session.deleted") {
+        // Matches both regular (session.deleted) and sync (session.deleted.1) variants
+        const isDeleted = type === "session.deleted" || name.startsWith("session.deleted")
+        if (isDeleted) {
           if (exitSaved) return
 
           log("session.deleted — saving context")
           const summary = buildSummary(conversationBuffer)
-          await $`${binary} save "session" ${summary}`.quiet().nothrow()
-          await $`${binary} session end --summary ${summary}`.quiet().nothrow()
+          await $`${binary} save --agent opencode "session" ${summary}`.quiet().nothrow()
+          await $`${binary} session end --agent opencode --summary ${summary}`.quiet().nothrow()
           exitSaved = true
           return
         }
@@ -240,7 +248,7 @@ const plugin: Plugin = async ({ $ }) => {
     "experimental.session.compacting": async (_input: unknown, output: { context?: string[] }) => {
       log("session.compacting — saving pre-compaction entry")
       const summary = buildSummary(conversationBuffer)
-      await $`${binary} save "compact" ${summary}`.quiet().nothrow()
+      await $`${binary} save --agent opencode "compact" ${summary}`.quiet().nothrow()
       log("session.compacting — injecting memory context")
       const result = await $`${binary} load --limit 10 --pretty`.quiet().nothrow()
       if (result.exitCode === 0 && result.stdout) {
@@ -256,10 +264,11 @@ const plugin: Plugin = async ({ $ }) => {
   }
 }
 
-export { buildSummary, conversationBuffer, exitSaved, BufferEntry }
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry }
 
 export function resetTestState(): void {
   conversationBuffer.length = 0
+  sessionInitialized = false
   exitSaved = false
 }
 

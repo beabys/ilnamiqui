@@ -13,6 +13,21 @@ between Claude Code chats. Data stays in local SQLite file per project
 - **MCP Server** — `ilnamiqui-mcp` (tools for Claude Code)
 - **This file** — tells you when/how to use the tools
 
+## Agent identity
+
+Every session is tagged with an agent identifier (`opencode` or `claude-code`).
+The lifecycle hooks pass `--agent claude-code` automatically on save/start/end.
+If you run CLI commands manually, include the flag:
+
+```bash
+ilnamiqui save --agent claude-code "key" "value"
+ilnamiqui session start --agent claude-code
+ilnamiqui session end --agent claude-code --summary "done"
+```
+
+Omitting `--agent` defaults to `opencode` — always specify `--agent claude-code`
+when running CLI commands manually.
+
 ---
 
 ## Setup
@@ -165,6 +180,13 @@ prune_memories(before="2026-01-01T00:00:00Z")           # safe — skips critica
 ## On chat end
 
 Save session summary before finishing:
+
+Via MCP tool (preferred):
 ```
 save_memory(key="session", value="<brief summary of what was done>")
+```
+
+Via CLI (fallback — always include agent):
+```bash
+ilnamiqui save --agent claude-code "session" "<brief summary of what was done>"
 ```

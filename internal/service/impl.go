@@ -145,7 +145,11 @@ func (s *serviceImpl) Save(ctx context.Context, req *SaveRequest) (*SaveResponse
 	if err := s.ensureDB(); err != nil {
 		return nil, err
 	}
-	sess, err := s.mgr.GetActiveSession(ctx, s.project)
+	agent := req.Agent
+	if agent == "" {
+		agent = session.AgentOpencode
+	}
+	sess, err := s.mgr.GetActiveSession(ctx, s.project, agent)
 	if err != nil {
 		return nil, fmt.Errorf("get active session: %w", err)
 	}
@@ -172,7 +176,7 @@ func (s *serviceImpl) Load(ctx context.Context, req *LoadRequest) (*LoadResponse
 	}
 
 	if req.SessionOnly {
-		sess, err := s.mgr.GetActiveSession(ctx, s.project)
+		sess, err := s.mgr.GetActiveSession(ctx, s.project, session.AgentOpencode)
 		if err != nil {
 			return nil, fmt.Errorf("get active session: %w", err)
 		}
@@ -287,14 +291,22 @@ func (s *serviceImpl) Delete(ctx context.Context, req *DeleteRequest) (*DeleteRe
 	return &DeleteResponse{}, nil
 }
 
-// StartSession starts a new session.
-func (s *serviceImpl) StartSession(ctx context.Context, _ *StartSessionRequest) (*StartSessionResponse, error) {
+// StartSession starts a new session, first closing any active sessions for the same agent.
+func (s *serviceImpl) StartSession(ctx context.Context, req *StartSessionRequest) (*StartSessionResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.ensureDB(); err != nil {
 		return nil, err
 	}
-	sess, err := s.mgr.StartSession(ctx, s.project)
+	agent := req.Agent
+	if agent == "" {
+		agent = session.AgentOpencode
+	}
+	// Close any existing active sessions for this agent
+	if err := s.mgr.CloseSessionsByAgent(ctx, s.project, agent); err != nil {
+		return nil, fmt.Errorf("close existing sessions: %w", err)
+	}
+	sess, err := s.mgr.StartSession(ctx, s.project, agent)
 	if err != nil {
 		return nil, fmt.Errorf("start session: %w", err)
 	}
@@ -308,7 +320,11 @@ func (s *serviceImpl) EndSession(ctx context.Context, req *EndSessionRequest) (*
 	if err := s.ensureDB(); err != nil {
 		return nil, err
 	}
-	sess, err := s.mgr.GetActiveSession(ctx, s.project)
+	agent := req.Agent
+	if agent == "" {
+		agent = session.AgentOpencode
+	}
+	sess, err := s.mgr.GetActiveSession(ctx, s.project, agent)
 	if err != nil {
 		return nil, fmt.Errorf("get active session: %w", err)
 	}

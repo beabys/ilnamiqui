@@ -112,16 +112,16 @@ func TestE2E_AutoReinitOnLoad(t *testing.T) {
 	if err := verifyDB.QueryRow("SELECT COUNT(*) FROM schema_versions").Scan(&versionCount); err != nil {
 		t.Fatalf("query schema_versions: %v", err)
 	}
-	if versionCount != 1 {
-		t.Fatalf("expected 1 row in schema_versions, got %d", versionCount)
+	if versionCount != 2 {
+		t.Fatalf("expected 2 rows in schema_versions (v1 + v2), got %d", versionCount)
 	}
 
 	var appliedVersion int
 	if err := verifyDB.QueryRow("SELECT MAX(version) FROM schema_versions").Scan(&appliedVersion); err != nil {
 		t.Fatalf("query max version: %v", err)
 	}
-	if appliedVersion != 1 {
-		t.Fatalf("expected schema version 1, got %d", appliedVersion)
+	if appliedVersion != 2 {
+		t.Fatalf("expected schema version 2, got %d", appliedVersion)
 	}
 
 	// memory_fts table exists
@@ -142,6 +142,15 @@ func TestE2E_AutoReinitOnLoad(t *testing.T) {
 		t.Fatalf("expected 1 row in memory_keys (backfilled from test entry), got %d", keyCount)
 	}
 
+	// agent column exists on sessions table (v2 migration)
+	var agentCount int
+	if err := verifyDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='agent'").Scan(&agentCount); err != nil {
+		t.Fatalf("query agent column: %v", err)
+	}
+	if agentCount != 1 {
+		t.Fatal("expected 'agent' column in sessions table (v2 migration)")
+	}
+
 	// Test memory entry still readable
 	var value string
 	if err := verifyDB.QueryRow("SELECT value FROM memory_entries WHERE key = 'test-key'").Scan(&value); err != nil {
@@ -156,11 +165,11 @@ func TestE2E_AutoReinitOnLoad(t *testing.T) {
 		t.Fatalf("second load --pretty failed: %v", err)
 	}
 
-	// 9. Verify still only 1 record in schema_versions (second load didn't duplicate)
+	// 9. Verify still only 2 records in schema_versions (second load didn't duplicate)
 	if err := verifyDB.QueryRow("SELECT COUNT(*) FROM schema_versions").Scan(&versionCount); err != nil {
 		t.Fatalf("query schema_versions after second load: %v", err)
 	}
-	if versionCount != 1 {
-		t.Fatalf("expected 1 row in schema_versions after second load, got %d", versionCount)
+	if versionCount != 2 {
+		t.Fatalf("expected 2 rows in schema_versions after second load, got %d", versionCount)
 	}
 }

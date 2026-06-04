@@ -17,7 +17,7 @@ import (
 func TestCLI_Save_Pretty(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
 	entry := &memory.MemoryEntry{ID: 1, Key: "k", Value: "v"}
-	mockSvc.EXPECT().Save(mock.Anything, &service.SaveRequest{Key: "k", Value: "v"}).
+	mockSvc.EXPECT().Save(mock.Anything, &service.SaveRequest{Key: "k", Value: "v", Agent: "opencode"}).
 		Return(&service.SaveResponse{Entry: entry}, nil)
 
 	cli := New(mockSvc)
@@ -42,7 +42,7 @@ func TestCLI_Init(t *testing.T) {
 func TestCLI_Save_JSON(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
 	entry := &memory.MemoryEntry{ID: 1, Key: "k", Value: "v"}
-	mockSvc.EXPECT().Save(mock.Anything, &service.SaveRequest{Key: "k", Value: "v"}).
+	mockSvc.EXPECT().Save(mock.Anything, &service.SaveRequest{Key: "k", Value: "v", Agent: "opencode"}).
 		Return(&service.SaveResponse{Entry: entry}, nil)
 
 	cli := New(mockSvc)
@@ -252,9 +252,46 @@ func TestCLI_List(t *testing.T) {
 	}
 }
 
+func TestCLI_Save_WithAgent(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	entry := &memory.MemoryEntry{ID: 1, Key: "k", Value: "v"}
+	mockSvc.EXPECT().Save(mock.Anything, &service.SaveRequest{Key: "k", Value: "v", Agent: "claude-code"}).
+		Return(&service.SaveResponse{Entry: entry}, nil)
+
+	cli := New(mockSvc)
+	err := cli.Run([]string{"save", "--agent", "claude-code", "k", "v"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCLI_SessionStart_WithAgent(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().StartSession(mock.Anything, &service.StartSessionRequest{Agent: "claude-code"}).
+		Return(&service.StartSessionResponse{Session: &memory.Session{ID: "new-sess-id"}}, nil)
+
+	cli := New(mockSvc)
+	err := cli.Run([]string{"session", "start", "--agent", "claude-code"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCLI_SessionEnd_WithAgent(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().EndSession(mock.Anything, &service.EndSessionRequest{Summary: "done", Agent: "claude-code"}).
+		Return(&service.EndSessionResponse{Session: &memory.Session{ID: "sess-1"}}, nil)
+
+	cli := New(mockSvc)
+	err := cli.Run([]string{"session", "end", "--agent", "claude-code", "--summary", "done"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCLI_SessionStart(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
-	mockSvc.EXPECT().StartSession(mock.Anything, &service.StartSessionRequest{}).
+	mockSvc.EXPECT().StartSession(mock.Anything, &service.StartSessionRequest{Agent: "opencode"}).
 		Return(&service.StartSessionResponse{Session: &memory.Session{ID: "new-sess-id"}}, nil)
 
 	cli := New(mockSvc)
@@ -266,7 +303,7 @@ func TestCLI_SessionStart(t *testing.T) {
 
 func TestCLI_SessionEnd(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
-	mockSvc.EXPECT().EndSession(mock.Anything, &service.EndSessionRequest{Summary: "done"}).
+	mockSvc.EXPECT().EndSession(mock.Anything, &service.EndSessionRequest{Summary: "done", Agent: "opencode"}).
 		Return(&service.EndSessionResponse{Session: &memory.Session{ID: "sess-1"}}, nil)
 
 	cli := New(mockSvc)

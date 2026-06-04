@@ -98,6 +98,7 @@ func (c *CLI) cmdInit(args []string) error {
 func (c *CLI) cmdSave(args []string) error {
 	fs := flag.NewFlagSet("save", flag.ContinueOnError)
 	pretty := fs.Bool("pretty", false, "human-readable output")
+	agent := fs.String("agent", "opencode", "agent identifier")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -107,7 +108,7 @@ func (c *CLI) cmdSave(args []string) error {
 	key := fs.Arg(0)
 	value := strings.Join(fs.Args()[1:], " ")
 
-	resp, err := c.svc.Save(context.Background(), &service.SaveRequest{Key: key, Value: value})
+	resp, err := c.svc.Save(context.Background(), &service.SaveRequest{Key: key, Value: value, Agent: *agent})
 	if err != nil {
 		return err
 	}
@@ -350,10 +351,11 @@ func (c *CLI) cmdSession(args []string) error {
 
 func (c *CLI) cmdSessionStart(args []string) error {
 	fs := flag.NewFlagSet("session start", flag.ContinueOnError)
+	agent := fs.String("agent", "opencode", "agent identifier")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resp, err := c.svc.StartSession(context.Background(), &service.StartSessionRequest{})
+	resp, err := c.svc.StartSession(context.Background(), &service.StartSessionRequest{Agent: *agent})
 	if err != nil {
 		return err
 	}
@@ -364,10 +366,11 @@ func (c *CLI) cmdSessionStart(args []string) error {
 func (c *CLI) cmdSessionEnd(args []string) error {
 	fs := flag.NewFlagSet("session end", flag.ContinueOnError)
 	summary := fs.String("summary", "", "session summary")
+	agent := fs.String("agent", "opencode", "agent identifier")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resp, err := c.svc.EndSession(context.Background(), &service.EndSessionRequest{Summary: *summary})
+	resp, err := c.svc.EndSession(context.Background(), &service.EndSessionRequest{Summary: *summary, Agent: *agent})
 	if err != nil {
 		return err
 	}
@@ -390,22 +393,24 @@ Usage:
 
 Commands:
   init                  Initialize database in .ilnamiqui/
-  save <key> <value>    Save a memory entry
+  save [--agent <agent>] <key> <value>
+                         Save a memory entry
   load [--session] [--limit N]
-                        Load memory entries (all or current session)
+                         Load memory entries (all or current session)
   list [--limit N]      List recent sessions
   keys [--limit N] [--pretty]
                          List distinct memory keys
   key update [--critical[=true|false]] <key>
-                        Update critical flag on a memory key (default: false)
+                         Update critical flag on a memory key (default: false)
   search <query> [--after DATE] [--before DATE] [--limit N]
                          Search memory entries by key or value, optionally filtered by date
   prune --before <date> [--key <key>]
                          Delete non-critical memory entries older than date
   delete <id>           Delete a memory entry by ID
-  session start         Start a new session
-  session end [--summary "text"]
-                        End the active session
+  session start [--agent <agent>]
+                         Start a new session
+  session end [--agent <agent>] [--summary "text"]
+                         End the active session
   version               Print version
   help                  Print this help
 
