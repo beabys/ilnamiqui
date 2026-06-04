@@ -66,3 +66,18 @@ type ListKeysRequest struct {
 type ListKeysResponse struct {
 	Keys []memory.KeyInfo
 }
+
+type KeyUpdateRequest struct {
+	Key      string
+	Critical bool
+}
+type KeyUpdateResponse struct{}
+
+type PruneRequest struct {
+	Before time.Time
+	Key    string // "*" or empty = all non-critical keys
+}
+type PruneResponse struct {
+	Deleted        int
+	OrphansCleaned int
+}

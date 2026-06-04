@@ -9,6 +9,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/beabys/ilnamiqui/internal/db"
 )
 
 // openTestDB creates an in-memory SQLite database with migrations applied.
@@ -847,6 +849,319 @@ func TestLoadEntries_limitMoreThanTotal(t *testing.T) {
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries with limit=10, got %d", len(entries))
 	}
+}
+
+func TestStore_PruneEntries(t *testing.T) {
+	type testEntry struct {
+		sessionID string
+		key       string
+		value     string
+		createdAt string
+		critical  bool
+	}
+
+	ctx := context.Background()
+	oldDate := "2024-01-01T00:00:00Z"
+	recentDate := "2026-06-04T00:00:00Z"
+	before := parseTime(t, "2025-01-01T00:00:00Z")
+
+	tests := []struct {
+		name        string
+		entries     []testEntry
+		pruneKey    string
+		wantDeleted int
+		wantKeys    []string // keys that should still have entries after prune
+	}{
+		{
+			name: "prune all non-critical old entries",
+			entries: []testEntry{
+				{"test-session", "project-path", "critical-path", oldDate, true},
+				{"test-session", "test", "old-value", oldDate, false},
+				{"test-session", "test", "recent-value", recentDate, false},
+				{"test-session", "other", "other-old", oldDate, false},
+			},
+			pruneKey:    "*",
+			wantDeleted: 2, // old "test" + old "other"
+			wantKeys:    []string{"project-path", "test"}, // "test" has recent entry
+		},
+		{
+			name: "prune only specific key",
+			entries: []testEntry{
+				{"test-session", "test", "old-value", oldDate, false},
+				{"test-session", "other", "other-old", oldDate, false},
+			},
+			pruneKey:    "test",
+			wantDeleted: 1, // only old "test"
+			wantKeys:    []string{"other"}, // "other" should remain
+		},
+		{
+			name: "no old entries to prune",
+			entries: []testEntry{
+				{"test-session", "test", "recent-value", recentDate, false},
+			},
+			pruneKey:    "*",
+			wantDeleted: 0,
+			wantKeys:    []string{"test"},
+		},
+		{
+			name: "critical key not pruned",
+			entries: []testEntry{
+				{"test-session", "project-path", "old-critical", oldDate, true},
+				{"test-session", "test", "old-value", oldDate, false},
+			},
+			pruneKey:    "*",
+			wantDeleted: 1, // only non-critical "test"
+			wantKeys:    []string{"project-path"}, // critical still has entries
+		},
+		{
+			name: "specific non-critical old entry pruned with key wildcard",
+			entries: []testEntry{
+				{"test-session", "other", "other-old", oldDate, false},
+			},
+			pruneKey:    "*",
+			wantDeleted: 1,
+			wantKeys:    nil, // all pruned
+		},
+		{
+			name: "specific non-critical old entry NOT pruned when key mismatch",
+			entries: []testEntry{
+				{"test-session", "other", "other-old", oldDate, false},
+			},
+			pruneKey:    "test",
+			wantDeleted: 0,
+			wantKeys:    []string{"other"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openTestDB(t)
+			store := NewStore(db)
+
+			for _, e := range tt.entries {
+				_, err := db.ExecContext(ctx,
+					`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+					e.sessionID, e.key, e.value, e.createdAt)
+				if err != nil {
+					t.Fatalf("insert entry %s/%s: %v", e.key, e.createdAt, err)
+				}
+				if e.critical {
+					_, err := db.ExecContext(ctx,
+						`INSERT OR REPLACE INTO memory_keys (key, last_used_at, critical) VALUES (?, ?, 1)`,
+						e.key, e.createdAt)
+					if err != nil {
+						t.Fatalf("mark critical %s: %v", e.key, err)
+					}
+				}
+			}
+
+			got, err := store.PruneEntries(ctx, before, tt.pruneKey)
+			if err != nil {
+				t.Fatalf("PruneEntries error: %v", err)
+			}
+			if got != tt.wantDeleted {
+				t.Fatalf("PruneEntries deleted %d, want %d", got, tt.wantDeleted)
+			}
+
+			entries, err := store.LoadAllEntries(ctx, 0)
+			if err != nil {
+				t.Fatalf("LoadAllEntries error: %v", err)
+			}
+			remaining := make(map[string]int)
+			for _, e := range entries {
+				remaining[e.Key]++
+			}
+			for _, k := range tt.wantKeys {
+				if remaining[k] == 0 {
+					t.Fatalf("expected entry for key %q to remain after prune, but it was deleted", k)
+				}
+			}
+			if tt.wantKeys == nil && len(entries) > 0 {
+				t.Fatalf("expected no remaining entries, got %d", len(entries))
+			}
+		})
+	}
+}
+
+func TestStore_CleanupOrphanKeys(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("orphan keys cleaned, non-orphan kept", func(t *testing.T) {
+		db := openTestDB(t)
+		store := NewStore(db)
+
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+			"test-session", "keep", "keep-value", "2024-01-01T00:00:00Z")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.ExecContext(ctx,
+			`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+			"test-session", "orphan", "orphan-value", "2024-01-01T00:00:00Z")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify both keys in memory_keys
+		keys, err := store.ListKeys(ctx, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(keys) != 2 {
+			t.Fatalf("expected 2 keys before cleanup, got %d", len(keys))
+		}
+
+		// Delete orphan entries directly
+		_, err = db.ExecContext(ctx, `DELETE FROM memory_entries WHERE key = 'orphan'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Clean up orphan keys
+		cleaned, err := store.CleanupOrphanKeys(ctx)
+		if err != nil {
+			t.Fatalf("CleanupOrphanKeys error: %v", err)
+		}
+		if cleaned != 1 {
+			t.Fatalf("expected 1 orphan key cleaned, got %d", cleaned)
+		}
+
+		// Verify orphan removed, keep still present
+		keys, err = store.ListKeys(ctx, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key remaining, got %d", len(keys))
+		}
+		if keys[0].Key != "keep" {
+			t.Fatalf("expected remaining key 'keep', got %q", keys[0].Key)
+		}
+	})
+
+	t.Run("critical orphan keys not deleted", func(t *testing.T) {
+		db := openTestDB(t)
+		store := NewStore(db)
+
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+			"test-session", "critical-orphan", "value", "2024-01-01T00:00:00Z")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Mark as critical
+		_, err = db.ExecContext(ctx,
+			`UPDATE memory_keys SET critical = 1 WHERE key = 'critical-orphan'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Delete the entry to make it orphaned
+		_, err = db.ExecContext(ctx, `DELETE FROM memory_entries WHERE key = 'critical-orphan'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Cleanup should NOT delete critical key
+		cleaned, err := store.CleanupOrphanKeys(ctx)
+		if err != nil {
+			t.Fatalf("CleanupOrphanKeys error: %v", err)
+		}
+		if cleaned != 0 {
+			t.Fatalf("expected 0 orphan keys cleaned (critical), got %d", cleaned)
+		}
+
+		// Verify critical key still exists
+		keys, err := store.ListKeys(ctx, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key (critical) remaining, got %d", len(keys))
+		}
+		if !keys[0].Critical {
+			t.Fatal("expected key to remain critical")
+		}
+	})
+}
+
+func TestStore_UpdateKeyCritical(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	d, err := db.NewDB(path)
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+	defer d.Close()
+
+	if err := db.RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	// Insert a key via the trigger (simulate save)
+	_, err = d.SQLDB().Exec(`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+		"00000000-0000-0000-0000-000000000000", "test-key", "value", time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("insert entry: %v", err)
+	}
+
+	store := NewStore(d.SQLDB())
+
+	// Update to critical
+	if err := store.UpdateKeyCritical(context.Background(), "test-key", true); err != nil {
+		t.Fatalf("UpdateKeyCritical true: %v", err)
+	}
+
+	// Verify
+	info := getKeyInfo(t, d.SQLDB(), "test-key")
+	if !info.Critical {
+		t.Fatal("expected critical=true")
+	}
+
+	// Update back to non-critical
+	if err := store.UpdateKeyCritical(context.Background(), "test-key", false); err != nil {
+		t.Fatalf("UpdateKeyCritical false: %v", err)
+	}
+
+	info = getKeyInfo(t, d.SQLDB(), "test-key")
+	if info.Critical {
+		t.Fatal("expected critical=false")
+	}
+}
+
+func TestStore_UpdateKeyCritical_NotFound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	d, err := db.NewDB(path)
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+	defer d.Close()
+	if err := db.RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	store := NewStore(d.SQLDB())
+	err = store.UpdateKeyCritical(context.Background(), "nonexistent", true)
+	if err == nil {
+		t.Fatal("expected error for nonexistent key")
+	}
+}
+
+// helper
+type keyInfo struct {
+	Key      string
+	Critical bool
+}
+
+func getKeyInfo(t *testing.T, db *sql.DB, key string) keyInfo {
+	var k keyInfo
+	var crit int
+	err := db.QueryRow("SELECT key, critical FROM memory_keys WHERE key = ?", key).Scan(&k.Key, &crit)
+	if err != nil {
+		t.Fatalf("get key info: %v", err)
+	}
+	k.Critical = crit != 0
+	return k
 }
 
 // File-based test helper for integration

@@ -9,9 +9,11 @@ type Service interface {
 	Save(ctx context.Context, req *SaveRequest) (*SaveResponse, error)
 	Load(ctx context.Context, req *LoadRequest) (*LoadResponse, error)
 	Search(ctx context.Context, req *SearchRequest) (*SearchResponse, error)
+	Prune(ctx context.Context, req *PruneRequest) (*PruneResponse, error)
 	ListSessions(ctx context.Context, req *ListSessionsRequest) (*ListSessionsResponse, error)
 	Delete(ctx context.Context, req *DeleteRequest) (*DeleteResponse, error)
 	ListKeys(ctx context.Context, req *ListKeysRequest) (*ListKeysResponse, error)
+	KeyUpdate(ctx context.Context, req *KeyUpdateRequest) (*KeyUpdateResponse, error)
 	StartSession(ctx context.Context, req *StartSessionRequest) (*StartSessionResponse, error)
 	EndSession(ctx context.Context, req *EndSessionRequest) (*EndSessionResponse, error)
 	Close() error

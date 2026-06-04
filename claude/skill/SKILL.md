@@ -107,6 +107,61 @@ ilnamiqui load --pretty
 
 ---
 
+---
+
+## Prune old memories
+
+Remove old non-critical memories to keep the database lean:
+
+```bash
+# Via CLI:
+ilnamiqui prune --before 2026-04-01                  # all non-critical keys
+ilnamiqui prune --before 2026-04-01 --key test        # specific key only
+
+# Via MCP tool:
+prune_memories(before="2026-01-01T00:00:00Z")
+prune_memories(before="2026-01-01T00:00:00Z", key="test")
+```
+
+**Behavior:**
+- Only deletes entries whose key is **not critical** (`critical = false` in `memory_keys`)
+- Critical keys (like `project-path`) are **never deleted** by prune — no matter how old
+- After deletion, orphaned `memory_keys` rows are auto-cleaned
+- `before` is required (RFC3339 format for MCP, YYYY-MM-DD or RFC3339 for CLI)
+- `key` is optional — defaults to `*` (all non-critical keys)
+- If no matches, returns `Pruned 0 entries` — no error
+
+---
+
+## Protect keys from prune
+
+Mark a key as **critical** so prune never touches it:
+
+```bash
+# Via CLI:
+ilnamiqui key update --critical architecture          # protect from prune
+ilnamiqui key update --critical=false architecture    # allow prune again
+
+# Via MCP tool:
+update_key(key="architecture", critical=true)
+update_key(key="architecture", critical=false)
+```
+
+**Behavior:**
+- Updates the `critical` flag on an existing key
+- Critical keys are completely excluded from prune
+- If key doesn't exist, returns an error
+- Use `list_keys` to see current flag status
+
+**Common workflow:**
+```bash
+list_keys()                                            # check which keys are critical
+update_key(key="architecture", critical=true)           # protect architecture decisions
+prune_memories(before="2026-01-01T00:00:00Z")           # safe — skips critical keys
+```
+
+---
+
 ## On chat end
 
 Save session summary before finishing:

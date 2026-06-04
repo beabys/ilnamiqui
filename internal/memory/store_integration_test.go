@@ -273,6 +273,57 @@ func TestIntegrationSearchEntries_FTS5_WithDateRange(t *testing.T) {
 	}
 }
 
+func TestIntegrationPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	db := fileDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Insert old non-critical entries directly
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+		"test-session", "old-key", "old-value", "2024-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+		"test-session", "old-key", "another-old", "2024-06-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert recent entry via store (should NOT be pruned)
+	_, err = store.SaveEntry(ctx, "test-session", "recent-key", "recent-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before := parseTime(t, "2025-01-01T00:00:00Z")
+	deleted, err := store.PruneEntries(ctx, before, "*")
+	if err != nil {
+		t.Fatalf("PruneEntries: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected 2 deleted (old-key entries), got %d", deleted)
+	}
+
+	// Verify only recent entry remains
+	entries, err := store.LoadAllEntries(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry after prune, got %d", len(entries))
+	}
+	if entries[0].Key != "recent-key" {
+		t.Fatalf("expected remaining entry 'recent-key', got %q", entries[0].Key)
+	}
+}
+
 func TestIntegrationListKeys_AfterInserts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
