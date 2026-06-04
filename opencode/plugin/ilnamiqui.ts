@@ -141,25 +141,34 @@ function resolveBinaryPath(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Binary finder
+// Binary finder — synchronous (no shell)
 // ---------------------------------------------------------------------------
 
-async function findBinary($: any): Promise<string | null> {
-  // 1. PATH lookup first (finds symlink at ~/.local/bin/ilnamiqui)
-  try {
-    const result = await $`command -v ilnamiqui`.quiet()
-    const stdout = String(result.stdout).trim()
-    if (stdout) {
-      return stdout
+/**
+ * Resolve ilnamiqui binary synchronously:
+ *  1. Walk PATH in process.env.PATH (no shell)
+ *  2. Fallback to platform-specific path in plugin dir
+ *  3. Return null if not found
+ */
+function resolveBinarySync(): string | null {
+  // 1. Scan PATH (no shell subprocess)
+  const pathDirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean)
+  for (const dir of pathDirs) {
+    const full = path.join(dir, "ilnamiqui")
+    if (fs.existsSync(full)) {
+      try {
+        fs.accessSync(full, fs.constants.X_OK)
+        return full
+      } catch {
+        /* not executable, continue */
+      }
     }
-  } catch {
-    /* fall through */
   }
 
   // 2. Fallback: platform-specific binary in plugin directory
   const platformPath = resolveBinaryPath()
   try {
-    await $`test -x ${platformPath}`.quiet()
+    fs.accessSync(platformPath, fs.constants.X_OK)
     return platformPath
   } catch {
     return null
@@ -171,12 +180,10 @@ async function findBinary($: any): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 const plugin: Plugin = async ({ $ }) => {
-  const binary = await findBinary($)
+  const binary = resolveBinarySync()
 
   if (!binary) {
-    log(
-      `binary not found (tried PATH and platform-specific path) — plugin disabled`,
-    )
+    log("binary not found (PATH + plugin dir) — plugin disabled")
     return {}
   }
 
@@ -202,29 +209,22 @@ const plugin: Plugin = async ({ $ }) => {
 
   // ----- Event hooks -----
   return {
-    event: async (input: unknown) => {
+    event: async ({ event }: { event: { type: string } }) => {
       try {
-        // Handle both bare Event and { event: Event } calling conventions
-        const raw = (input as Record<string, unknown>)?.event ?? input
-        const ev = raw as Record<string, unknown>
-        const type = typeof ev?.type === "string" ? ev.type : ""
-        const name = typeof ev?.name === "string" ? ev.name : ""
+        log(`event: ${event.type}`)
 
         // session.created — start opencode session + load previous context
-        // Matches both regular (session.created) and sync (session.created.1) variants
-        const isCreated = type === "session.created" || name.startsWith("session.created")
-        if (isCreated) {
+        if (event.type === "session.created") {
           if (sessionInitialized) return
           sessionInitialized = true
           log("session.created — starting session and loading context")
-          // Start session (closes old opencode sessions) then load context
           await $`${binary} session start --agent opencode`.quiet().nothrow()
           await $`${binary} load --limit 50`.quiet().nothrow()
           return
         }
 
         // session.compacted — save memory entry + reload after compaction
-        if (type === "session.compacted") {
+        if (event.type === "session.compacted") {
           log("session.compacted — saving entry and reloading memories")
           await $`${binary} save --agent opencode "compact" "compaction completed at ${new Date().toISOString()}"`.quiet().nothrow()
           await $`${binary} load --limit 50`.quiet().nothrow()
@@ -232,9 +232,7 @@ const plugin: Plugin = async ({ $ }) => {
         }
 
         // session.deleted — user typed /exit or session ended
-        // Matches both regular (session.deleted) and sync (session.deleted.1) variants
-        const isDeleted = type === "session.deleted" || name.startsWith("session.deleted")
-        if (isDeleted) {
+        if (event.type === "session.deleted") {
           if (exitSaved) return
 
           log("session.deleted — saving context")
@@ -271,7 +269,7 @@ const plugin: Plugin = async ({ $ }) => {
 
 export const ilnamiquiPlugin = plugin
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, findBinary, resolveBinaryPath }
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath }
 
 export function resetTestState(): void {
   conversationBuffer.length = 0

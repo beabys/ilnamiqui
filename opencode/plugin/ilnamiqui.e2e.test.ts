@@ -3,6 +3,8 @@ import { execSync } from "child_process"
 import { existsSync, accessSync, constants } from "fs"
 import { homedir } from "os"
 import { join } from "path"
+import pluginModule from "./ilnamiqui"
+import { resolveBinarySync } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
 // E2E: Plugin Binary Resolution
@@ -131,5 +133,39 @@ describe("plugin binary resolution (E2E)", () => {
       // Should be an absolute path
       expect(binPath.startsWith("/")).toBe(true)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// E2E: resolveBinarySync — synchronous binary resolution
+//
+// Tests from requirements — plan requires synchronous binary resolution so
+// hook registration doesn't miss session.created at startup.
+// ---------------------------------------------------------------------------
+
+describe("resolveBinarySync export (E2E)", () => {
+  it("exports resolveBinarySync as a function", () => {
+    expect(typeof resolveBinarySync).toBe("function")
+  })
+
+  it("module default export has server function that returns event handler", async () => {
+    // Default export = { id, server }
+    const plugin = pluginModule as { id: string; server: (ctx: Record<string, unknown>) => Promise<Record<string, unknown>>; }
+    expect(typeof plugin.server).toBe("function")
+
+    // Call server with minimal context to get hooks (including event handler)
+    const hooks = await plugin.server({} as any)
+    expect(typeof hooks.event).toBe("function")
+  })
+
+  it("resolveBinarySync finds ilnamiqui binary on real system", () => {
+    const binPath = resolveBinarySync()
+    expect(binPath).not.toBeNull()
+    expect(typeof binPath).toBe("string")
+    // Must be an absolute path containing ilnamiqui
+    expect((binPath as string).startsWith("/")).toBe(true)
+    expect((binPath as string)).toContain("ilnamiqui")
+    // Binary must be executable
+    expect(() => accessSync(binPath as string, constants.X_OK)).not.toThrow()
   })
 })
