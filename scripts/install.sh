@@ -120,10 +120,11 @@ if [ -z "$VERSION" ]; then
 fi
 
 # ─── Paths ─────────────────────────────────────────────────────────────────────
+SYMLINK_PATH="${HOME}/.local/bin/ilnamiqui"
+
 case "$TARGET" in
   opencode)
     BIN_DIR="${HOME}/.config/opencode/plugins/ilnamiqui"
-    SYMLINK_PATH="${HOME}/.local/bin/ilnamiqui"
     ;;
   claude)
     BIN_DIR="${HOME}/.claude/plugins/ilnamiqui"
@@ -136,6 +137,8 @@ CLAUDE_SKILL_DIR="${HOME}/.claude/skills/ilnamiqui"
 CLAUDE_SKILL_PATH="${CLAUDE_SKILL_DIR}/SKILL.md"
 OPENCODE_SKILL_DIR="${HOME}/.config/opencode/skills/ilnamiqui"
 OPENCODE_PLUGIN_DIR="${HOME}/.config/opencode/plugins"
+CLAUDE_HOOKS_DIR="${HOME}/.claude/hooks/ilnamiqui"
+CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 
 BINARY_NAME="ilnamiqui-${OS}-${ARCH}"
 MCP_BINARY_NAME="ilnamiqui-mcp-${OS}-${ARCH}"
@@ -150,6 +153,10 @@ MCP_BINARY_PATH="${BIN_DIR}/${MCP_BINARY_NAME}"
 OPENCODE_SKILL_REPO_PATH="${RAW_BASE}/opencode/skill/SKILL.md"
 OPENCODE_PLUGIN_REPO_PATH="${RAW_BASE}/opencode/plugin/ilnamiqui.ts"
 CLAUDE_SKILL_REPO_PATH="${RAW_BASE}/claude/skill/SKILL.md"
+HOOK_SESSION_START_REPO="${RAW_BASE}/claude/hooks/ilnamiqui-session-start.sh"
+HOOK_PRECOMPACT_REPO="${RAW_BASE}/claude/hooks/ilnamiqui-precompact.sh"
+HOOK_POSTCOMPACT_REPO="${RAW_BASE}/claude/hooks/ilnamiqui-postcompact.sh"
+HOOK_SESSION_END_REPO="${RAW_BASE}/claude/hooks/ilnamiqui-session-end.sh"
 
 # Archive URL — GoReleaser produces archives containing both binaries
 ARCHIVE_EXT=".tar.gz"
@@ -338,9 +345,13 @@ case "$TARGET" in
     if [ "$DRY_RUN" = true ]; then
       info "[dry-run] Would create symlink: ${SYMLINK_PATH} → ${BINARY_PATH}"
     else
-      mkdir -p "${HOME}/.local/bin"
-      ln -sf "$BINARY_PATH" "$SYMLINK_PATH"
-      info "Symlink created: ${SYMLINK_PATH} → ${BINARY_PATH}"
+      if [ ! -L "$SYMLINK_PATH" ] && [ ! -f "$SYMLINK_PATH" ]; then
+        mkdir -p "${HOME}/.local/bin"
+        ln -s "$BINARY_PATH" "$SYMLINK_PATH"
+        info "Symlink created: ${SYMLINK_PATH} → ${BINARY_PATH}"
+      else
+        info "Symlink already exists: ${SYMLINK_PATH}"
+      fi
     fi
     ;;
 
@@ -413,7 +424,97 @@ with open(file, 'w') as f:
       exit 1
     fi
 
-    # 5. Register skill in CLAUDE.md (so Claude Code loads it)
+    # 5. Install lifecycle hooks
+    echo ""
+    action "Installing lifecycle hooks..."
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would download hooks to ${CLAUDE_HOOKS_DIR}/"
+    else
+      mkdir -p "$CLAUDE_HOOKS_DIR"
+      download "$HOOK_SESSION_START_REPO" "${CLAUDE_HOOKS_DIR}/session-start.sh" "session-start hook"
+      download "$HOOK_PRECOMPACT_REPO" "${CLAUDE_HOOKS_DIR}/precompact.sh" "precompact hook"
+      download "$HOOK_POSTCOMPACT_REPO" "${CLAUDE_HOOKS_DIR}/postcompact.sh" "postcompact hook"
+      download "$HOOK_SESSION_END_REPO" "${CLAUDE_HOOKS_DIR}/session-end.sh" "session-end hook"
+      chmod +x "${CLAUDE_HOOKS_DIR}"/*.sh
+      echo "  Hooks installed to ${CLAUDE_HOOKS_DIR}/"
+    fi
+
+    # 6. Create CLI symlink (needed by hooks)
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would create symlink: ${SYMLINK_PATH} → ${BINARY_PATH}"
+    else
+      if [ ! -L "$SYMLINK_PATH" ] && [ ! -f "$SYMLINK_PATH" ]; then
+        mkdir -p "${HOME}/.local/bin"
+        ln -s "$BINARY_PATH" "$SYMLINK_PATH"
+        info "Symlink created: ${SYMLINK_PATH} → ${BINARY_PATH}"
+      else
+        info "Symlink already exists: ${SYMLINK_PATH}"
+      fi
+    fi
+
+    # 7. Register hooks in settings.json
+    echo ""
+    action "Registering hooks in settings.json..."
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would update ${CLAUDE_SETTINGS}"
+    else
+      # Create settings.json if it doesn't exist
+      if [ ! -f "$CLAUDE_SETTINGS" ]; then
+        mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+        echo '{}' > "$CLAUDE_SETTINGS"
+        info "Created ${CLAUDE_SETTINGS}"
+      fi
+
+      HOOKS_DIR="${HOME}/.claude/hooks/ilnamiqui"
+      SESSION_START_CMD="${HOOKS_DIR}/session-start.sh"
+      PRECOMPACT_CMD="${HOOKS_DIR}/precompact.sh"
+      POSTCOMPACT_CMD="${HOOKS_DIR}/postcompact.sh"
+      SESSION_END_CMD="${HOOKS_DIR}/session-end.sh"
+
+      if command -v jq &>/dev/null; then
+        tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
+        jq --arg ss "$SESSION_START_CMD" --arg pc "$PRECOMPACT_CMD" --arg poc "$POSTCOMPACT_CMD" --arg se "$SESSION_END_CMD" '
+          .hooks //= {} |
+          .hooks["SessionStart"] = [{"hooks": [{"type": "command", "command": $ss}]}] |
+          .hooks["PreCompact"] = [{"hooks": [{"type": "command", "command": $pc}]}] |
+          .hooks["PostCompact"] = [{"hooks": [{"type": "command", "command": $poc}]}] |
+          .hooks["SessionEnd"] = [{"hooks": [{"type": "command", "command": $se, "timeout": 5}]}]
+        ' "$CLAUDE_SETTINGS" > "$tmp" 2>/dev/null && mv "$tmp" "$CLAUDE_SETTINGS" || {
+          rm -f "$tmp"
+          error "jq failed to update ${CLAUDE_SETTINGS}"
+          exit 1
+        }
+        info "Updated ${CLAUDE_SETTINGS} using jq"
+      elif command -v python3 &>/dev/null; then
+        python3 -c "
+import json, os
+file = '${CLAUDE_SETTINGS}'
+try:
+    with open(file) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
+data['hooks'] = data.get('hooks', {})
+data['hooks']['SessionStart'] = [{'hooks': [{'type': 'command', 'command': '${SESSION_START_CMD}'}]}]
+data['hooks']['PreCompact'] = [{'hooks': [{'type': 'command', 'command': '${PRECOMPACT_CMD}'}]}]
+data['hooks']['PostCompact'] = [{'hooks': [{'type': 'command', 'command': '${POSTCOMPACT_CMD}'}]}]
+data['hooks']['SessionEnd'] = [{'hooks': [{'type': 'command', 'command': '${SESSION_END_CMD}', 'timeout': 5}]}]
+with open(file, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" 2>/dev/null || {
+          error "python3 script failed to update ${CLAUDE_SETTINGS}"
+          exit 1
+        }
+        info "Updated ${CLAUDE_SETTINGS} using python3"
+      else
+        error "Neither jq nor python3 found. Cannot update ${CLAUDE_SETTINGS}"
+        error "Please install jq or python3, or update manually."
+        exit 1
+      fi
+    fi
+
+    # 8. Register skill in CLAUDE.md (so Claude Code loads it)
     echo ""
     action "Registering skill in CLAUDE.md..."
     CLAUDE_HOME="${HOME}/.claude/CLAUDE.md"
@@ -453,9 +554,12 @@ echo ""
 echo "  ✓ ilnamiqui installed for ${TARGET}"
 echo "  Binary: ${BINARY_PATH}"
 if [ "$TARGET" = "opencode" ]; then
-  echo "  Restart opencode to activate."
+  echo "  Plugin: registered"
+  echo "  Skill: installed"
 elif [ "$TARGET" = "claude" ]; then
   echo "  MCP server: ${MCP_BINARY_PATH}"
+  echo "  Hooks: installed"
+  echo "  Skill: installed"
   echo "  Restart Claude Code to activate."
 fi
 echo ""
