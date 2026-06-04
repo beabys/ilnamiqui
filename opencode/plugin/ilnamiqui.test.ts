@@ -3,6 +3,8 @@ import {
   buildSummary,
   conversationBuffer,
   exitSaved,
+  findBinary,
+  resolveBinaryPath,
   resetTestState,
 } from "./ilnamiqui"
 
@@ -281,5 +283,144 @@ describe("exitSaved guard", () => {
     // but we can verify the reset function works
     // exitSaved is exported as const (read-only binding) so we verify it's false
     expect(exitSaved).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// resolveBinaryPath — platform-specific binary path
+// ---------------------------------------------------------------------------
+
+describe("resolveBinaryPath", () => {
+  it("returns path containing ilnamiqui", () => {
+    const p = resolveBinaryPath()
+    expect(p).toContain("ilnamiqui")
+  })
+
+  it("returns path in the opencode plugin directory", () => {
+    const p = resolveBinaryPath()
+    expect(p).toContain(".config/opencode/plugins/ilnamiqui")
+  })
+
+  it("includes platform name (normalized from win32 → windows)", () => {
+    const p = resolveBinaryPath()
+    const platform = process.platform === "win32" ? "windows" : process.platform
+    expect(p).toContain(platform)
+  })
+
+  it("includes architecture", () => {
+    const p = resolveBinaryPath()
+    expect(p).toContain(process.arch)
+  })
+
+  it("appends .exe on win32", () => {
+    // Mock process.platform for this test
+    const orig = Object.getOwnPropertyDescriptor(process, "platform")
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" })
+      const p = resolveBinaryPath()
+      expect(p).toContain("windows")
+      expect(p).toMatch(/\.exe$/)
+    } finally {
+      if (orig) {
+        Object.defineProperty(process, "platform", orig)
+      }
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// findBinary — binary resolution order: PATH first, platform fallback second
+// ---------------------------------------------------------------------------
+
+describe("findBinary", () => {
+  // Helper: create a mock `$` template tag that returns configured results
+  function mockShell(config: {
+    commandVFound?: boolean
+    commandVPath?: string
+    platformFound?: boolean
+  }) {
+    const calls: string[] = []
+    const $ = (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const cmd = strings.reduce(
+        (acc, s, i) => acc + s + (values[i] ?? ""),
+        "",
+      )
+      calls.push(cmd.trim())
+
+      const quiet = () => {
+        // command -v ilnamiqui
+        if (cmd.trim().startsWith("command -v")) {
+          if (config.commandVFound ?? true) {
+            return Promise.resolve({
+              stdout: config.commandVPath ?? "/usr/local/bin/ilnamiqui",
+              stderr: "",
+              exitCode: 0,
+            })
+          }
+          return Promise.reject(new Error("command not found"))
+        }
+        // test -x <path>
+        if (cmd.trim().startsWith("test -x")) {
+          if (config.platformFound ?? false) {
+            return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 })
+          }
+          return Promise.reject(new Error("file not found"))
+        }
+        return Promise.reject(new Error(`unexpected command: ${cmd}`))
+      }
+      return { quiet }
+    }
+    return { $, calls }
+  }
+
+  it("returns PATH binary when command -v succeeds", async () => {
+    const { $ } = mockShell({
+      commandVFound: true,
+      commandVPath: "/home/user/.local/bin/ilnamiqui",
+    })
+    const result = await findBinary($)
+    expect(result).toBe("/home/user/.local/bin/ilnamiqui")
+  })
+
+  it("tries PATH before platform-specific path (ordering test)", async () => {
+    const { $, calls } = mockShell({
+      commandVFound: true,
+      commandVPath: "/usr/bin/ilnamiqui",
+      platformFound: false,
+    })
+    await findBinary($)
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+    expect(calls[0]).toBe("command -v ilnamiqui")
+  })
+
+  it("falls back to platform binary when not on PATH", async () => {
+    // command -v fails, test -x succeeds
+    const { $ } = mockShell({
+      commandVFound: false,
+      platformFound: true,
+    })
+    const result = await findBinary($)
+    // Should return a path (platform-specific) containing ilnamiqui
+    expect(result).not.toBeNull()
+    expect(result).toContain("ilnamiqui")
+  })
+
+  it("returns null when both PATH and platform binary missing", async () => {
+    const { $ } = mockShell({
+      commandVFound: false,
+      platformFound: false,
+    })
+    const result = await findBinary($)
+    expect(result).toBeNull()
+  })
+
+  it("returns null when command -v stdout is empty", async () => {
+    const { $ } = mockShell({
+      commandVFound: true,
+      commandVPath: "",
+      platformFound: false,
+    })
+    const result = await findBinary($)
+    expect(result).toBeNull()
   })
 })

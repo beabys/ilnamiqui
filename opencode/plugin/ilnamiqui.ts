@@ -144,16 +144,23 @@ function resolveBinaryPath(): string {
 // Binary finder
 // ---------------------------------------------------------------------------
 
-async function findBinary($: any, platformPath: string): Promise<string | null> {
+async function findBinary($: any): Promise<string | null> {
+  // 1. PATH lookup first (finds symlink at ~/.local/bin/ilnamiqui)
   try {
-    await $`test -x ${platformPath}`.quiet()
-    return platformPath
+    const result = await $`command -v ilnamiqui`.quiet()
+    const stdout = String(result.stdout).trim()
+    if (stdout) {
+      return stdout
+    }
   } catch {
     /* fall through */
   }
+
+  // 2. Fallback: platform-specific binary in plugin directory
+  const platformPath = resolveBinaryPath()
   try {
-    await $`which ilnamiqui`.quiet()
-    return "ilnamiqui"
+    await $`test -x ${platformPath}`.quiet()
+    return platformPath
   } catch {
     return null
   }
@@ -164,13 +171,11 @@ async function findBinary($: any, platformPath: string): Promise<string | null> 
 // ---------------------------------------------------------------------------
 
 const plugin: Plugin = async ({ $ }) => {
-  const resolved = resolveBinaryPath()
-
-  const binary = await findBinary($, resolved)
+  const binary = await findBinary($)
 
   if (!binary) {
     log(
-      `binary not found (tried ${path.basename(resolved)} and PATH) — plugin disabled`,
+      `binary not found (tried PATH and platform-specific path) — plugin disabled`,
     )
     return {}
   }
@@ -264,7 +269,9 @@ const plugin: Plugin = async ({ $ }) => {
   }
 }
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry }
+export const ilnamiquiPlugin = plugin
+
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, findBinary, resolveBinaryPath }
 
 export function resetTestState(): void {
   conversationBuffer.length = 0
@@ -272,4 +279,4 @@ export function resetTestState(): void {
   exitSaved = false
 }
 
-export default plugin
+export default { id: "ilnamiqui", server: plugin }

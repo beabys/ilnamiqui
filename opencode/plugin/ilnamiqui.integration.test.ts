@@ -33,7 +33,7 @@ describe("plugin loading", () => {
   it("exports plugin as default", async () => {
     const mod = await import("./ilnamiqui")
     expect(mod.default).toBeDefined()
-    expect(typeof mod.default).toBe("function")
+    expect(typeof mod.default.server).toBe("function")
   })
 
   it("exports internals for testing", () => {
