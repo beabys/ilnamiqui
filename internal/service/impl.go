@@ -163,6 +163,14 @@ func (s *serviceImpl) Load(ctx context.Context, req *LoadRequest) (*LoadResponse
 	if err := s.ensureDB(); err != nil {
 		return nil, err
 	}
+
+	// Auto-reinit: ensure all schema tables exist (idempotent, version-gated)
+	if s.database != nil {
+		if err := s.dbOpener.RunMigrations(s.database.SQLDB()); err != nil {
+			return nil, fmt.Errorf("auto-reinit: %w", err)
+		}
+	}
+
 	if req.SessionOnly {
 		sess, err := s.mgr.GetActiveSession(ctx, s.project)
 		if err != nil {

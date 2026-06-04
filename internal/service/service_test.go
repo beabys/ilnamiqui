@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/beabys/ilnamiqui/internal/config"
 	"github.com/beabys/ilnamiqui/internal/db"
 	"github.com/beabys/ilnamiqui/internal/memory"
 )
@@ -204,4 +205,81 @@ func TestService_SessionLifecycle(t *testing.T) {
 	if endResp.Session == nil {
 		t.Fatal("expected session in response")
 	}
+}
+
+// TestService_Load_AutoReinit simulates an old DB missing new tables and verifies Load auto-creates them.
+func TestService_Load_AutoReinit(t *testing.T) {
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	tmpDir := t.TempDir()
+	_ = os.Chdir(tmpDir)
+
+	// Create a DB with only minimal old tables (simulate pre-migration state)
+	ilnamiquiDir := tmpDir + "/.ilnamiqui"
+	_ = os.MkdirAll(ilnamiquiDir, 0o755)
+	dbPath := ilnamiquiDir + "/ilnamiqui.db"
+	database, err := db.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+	defer database.Close()
+
+	// Create only the old tables (sessions, memory_entries) — NOT memory_fts, memory_keys, schema_versions
+	_, err = database.SQLDB().Exec(`
+		CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY, project TEXT NOT NULL, started_at TEXT NOT NULL,
+			ended_at TEXT, summary TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE TABLE IF NOT EXISTS memory_entries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+			key TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+		INSERT OR IGNORE INTO sessions (id, project, started_at, ended_at, summary)
+		VALUES ('00000000-0000-0000-0000-000000000000', '_system', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z', 'system session');
+	`)
+	if err != nil {
+		t.Fatalf("create old tables: %v", err)
+	}
+	database.Close()
+
+	// Write sentinel so ensureDB skips migration checks
+	if err := config.WriteSentinel(tmpDir); err != nil {
+		t.Fatalf("WriteSentinel: %v", err)
+	}
+
+	svc := New(realConfig{}, realDBOpener{})
+	defer svc.Close()
+
+	// Call Load — should auto-reinit missing tables
+	loadResp, err := svc.Load(context.Background(), &LoadRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("Load after auto-reinit failed: %v", err)
+	}
+
+	// Re-open to verify tables
+	database2, err := db.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewDB reopen: %v", err)
+	}
+	defer database2.Close()
+
+	// Verify new tables exist
+	for _, tbl := range []string{"memory_fts", "memory_keys", "schema_versions"} {
+		var found int
+		_ = database2.SQLDB().QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tbl).Scan(&found)
+		if found == 0 {
+			t.Fatalf("table %s was not created by auto-reinit", tbl)
+		}
+	}
+
+	// Verify schema_versions has the version recorded
+	var version int
+	_ = database2.SQLDB().QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_versions").Scan(&version)
+	expected := db.LatestVersion()
+	if version != expected {
+		t.Fatalf("expected schema version %d, got %d", expected, version)
+	}
+
+	_ = loadResp // entries may be empty — that's fine
 }

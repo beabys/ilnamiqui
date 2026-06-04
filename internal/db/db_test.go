@@ -132,12 +132,12 @@ func TestRunMigrations(t *testing.T) {
 	}
 
 	var count int
-	row := d.SQLDB().QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions', 'memory_entries')")
+	row := d.SQLDB().QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions', 'memory_entries', 'schema_versions')")
 	if err := row.Scan(&count); err != nil {
 		t.Fatalf("scan table count: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("expected 2 tables, got %d", count)
+	if count != 3 {
+		t.Fatalf("expected 3 tables, got %d", count)
 	}
 
 	// idempotent
@@ -169,5 +169,42 @@ func TestRunMigrations_InvalidConn(t *testing.T) {
 	err = RunMigrations(db)
 	if err == nil {
 		t.Fatal("expected error with closed *sql.DB connection")
+	}
+}
+
+func TestRunMigrations_Versioning(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "version.db")
+	d, err := NewDB(path)
+	if err != nil {
+		t.Fatalf("NewDB error: %v", err)
+	}
+	defer d.Close()
+
+	// First run: should apply v1
+	if err := RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("first RunMigrations: %v", err)
+	}
+
+	// Verify schema_versions has version 1
+	var version int
+	var desc string
+	err = d.SQLDB().QueryRow("SELECT version, description FROM schema_versions ORDER BY version DESC LIMIT 1").Scan(&version, &desc)
+	if err != nil {
+		t.Fatalf("query schema_versions: %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("expected version 1, got %d", version)
+	}
+
+	// Second run: should skip (version already applied)
+	if err := RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("second RunMigrations: %v", err)
+	}
+
+	// Verify only one version record
+	var count int
+	_ = d.SQLDB().QueryRow("SELECT COUNT(*) FROM schema_versions").Scan(&count)
+	if count != 1 {
+		t.Fatalf("expected 1 version record, got %d", count)
 	}
 }
