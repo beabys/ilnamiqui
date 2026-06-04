@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/beabys/ilnamiqui/internal/config"
 	"github.com/beabys/ilnamiqui/internal/db"
@@ -282,4 +283,122 @@ func TestService_Load_AutoReinit(t *testing.T) {
 	}
 
 	_ = loadResp // entries may be empty — that's fine
+}
+
+func TestService_KeyUpdate(t *testing.T) {
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+
+	svc := New(realConfig{}, realDBOpener{})
+	defer svc.Close()
+
+	_, err := svc.Init(context.Background(), &InitRequest{})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Save an entry to create a key
+	_, err = svc.Save(context.Background(), &SaveRequest{Key: "test-key", Value: "val"})
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Update to critical
+	_, err = svc.KeyUpdate(context.Background(), &KeyUpdateRequest{Key: "test-key", Critical: true})
+	if err != nil {
+		t.Fatalf("KeyUpdate true: %v", err)
+	}
+
+	// Verify via ListKeys
+	keysResp, err := svc.ListKeys(context.Background(), &ListKeysRequest{Limit: 0})
+	if err != nil {
+		t.Fatalf("ListKeys: %v", err)
+	}
+	found := false
+	for _, k := range keysResp.Keys {
+		if k.Key == "test-key" && k.Critical {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected 'test-key' with critical=true after KeyUpdate")
+	}
+
+	// Test nonexistent key
+	_, err = svc.KeyUpdate(context.Background(), &KeyUpdateRequest{Key: "does-not-exist", Critical: true})
+	if err == nil {
+		t.Fatal("expected error for nonexistent key")
+	}
+}
+
+func TestService_Prune(t *testing.T) {
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+
+	svc := New(realConfig{}, realDBOpener{})
+	defer svc.Close()
+
+	_, err := svc.Init(context.Background(), &InitRequest{})
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Save a non-critical entry
+	_, err = svc.Save(context.Background(), &SaveRequest{Key: "test", Value: "recent"})
+	if err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Open DB directly to insert an old entry with past timestamp
+	dbPath := tmpDir + "/.ilnamiqui/ilnamiqui.db"
+	database, err := db.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+	defer database.Close()
+
+	_, err = database.SQLDB().Exec(
+		`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+		"00000000-0000-0000-0000-000000000000", "test", "old value", "2024-01-01T00:00:00Z",
+	)
+	if err != nil {
+		t.Fatalf("insert old entry: %v", err)
+	}
+
+	// Prune with Before = recent date, Key = "*"
+	resp, err := svc.Prune(context.Background(), &PruneRequest{
+		Before: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Key:    "*",
+	})
+	if err != nil {
+		t.Fatalf("Prune failed: %v", err)
+	}
+	if resp.Deleted == 0 {
+		t.Fatal("expected Deleted > 0, got 0")
+	}
+	if resp.OrphansCleaned != 0 {
+		// Non-critical key "test" still has a recent entry, so no orphans expected
+	}
+
+	// Verify "project-path" still exists (critical, not deleted)
+	loadResp, err := svc.Load(context.Background(), &LoadRequest{Limit: 0})
+	if err != nil {
+		t.Fatalf("Load after prune failed: %v", err)
+	}
+	foundProjectPath := false
+	for _, e := range loadResp.Entries {
+		if e.Key == "project-path" {
+			foundProjectPath = true
+			break
+		}
+	}
+	if !foundProjectPath {
+		t.Fatal("expected 'project-path' to still exist after prune (critical key)")
+	}
 }

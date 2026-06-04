@@ -24,8 +24,8 @@ func TestHandler_RegisterTools(t *testing.T) {
 
 	// Verify tools are registered by calling ListTools
 	tools := s.ListTools()
-	if len(tools) != 7 {
-		t.Fatalf("expected 7 tools, got %d", len(tools))
+	if len(tools) != 9 {
+		t.Fatalf("expected 9 tools, got %d", len(tools))
 	}
 }
 

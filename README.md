@@ -171,7 +171,9 @@ sync is opencode-specific (plugin-based).
 | `load [--session] [--limit N] [--pretty]` | Load memory entries (all or current session) |
 | `list [--limit N] [--pretty]` | List recent sessions |
 | `keys [--limit N] [--pretty]` | List distinct keys in use (critical first, then by recency) |
+| `key update [--critical[=true\|false]] <key>` | Mark/unmark a key as critical (protected from prune) |
 | `search <query> [--mode key\|content\|both] [--after DATE] [--before DATE] [--limit N] [--pretty]` | Search memories by key (default, indexed), content (FTS5), or both |
+| `prune --before <date> [--key <key>]` | Delete non-critical memory entries older than date |
 | `delete <id>` | Delete a memory entry by ID |
 | `session start` | Start a new session manually |
 | `session end --summary "..."` | End the active session with a summary |
@@ -184,7 +186,7 @@ Commands `save`, `load`, `list`, `keys`, and `search` accept `--pretty` for huma
 
 ## MCP Server (Claude Code)
 
-The MCP server (`ilnamiqui-mcp`) provides 7 tools over stdio:
+The MCP server (`ilnamiqui-mcp`) provides 9 tools over stdio:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
@@ -195,6 +197,8 @@ The MCP server (`ilnamiqui-mcp`) provides 7 tools over stdio:
 | `list_keys` | `limit` (opt, default 50) | List distinct keys in use (critical first, then recency) |
 | `list_sessions` | `limit` (opt, default 10) | List recent sessions |
 | `delete_memory` | `id` (required) | Delete a memory entry |
+| `prune_memories` | `before` (required, RFC3339), `key` (opt, default `*`) | Delete non-critical memory entries older than date |
+| `update_key` | `key` (required), `critical` (required, bool) | Mark/unmark a key as critical (protected from prune) |
 
 The Claude Code skill (`claude/skill/CLAUDE.md`) instructs the AI to call these tools automatically.
 
@@ -218,7 +222,7 @@ ilnamiqui is a hexagonal system with adapters for different AI assistants:
 │   adapter        │  │    adapter            │
 ├──────────────────┤  ├──────────────────────┤
 │ Plugin (TS)      │  │ MCP Server (Go)       │
-│   → lifecycle    │  │   → 6 tools via      │
+│   → lifecycle    │  │   → 9 tools via      │
 │     hooks        │  │     stdio transport   │
 │ Skill (SKILL.md) │  │ Skill (CLAUDE.md)     │
 │   → teaches AI   │  │   → teaches AI to    │
@@ -229,7 +233,7 @@ ilnamiqui is a hexagonal system with adapters for different AI assistants:
 | Layer | opencode | Claude Code |
 |-------|----------|-------------|
 | **Binary** | `ilnamiqui` CLI | `ilnamiqui` CLI + `ilnamiqui-mcp` MCP server |
-| **Integration** | TypeScript plugin (lifecycle hooks) | MCP stdio server (6 tools) |
+| **Integration** | TypeScript plugin (lifecycle hooks) | MCP stdio server (9 tools) |
 | **AI instructions** | `opencode/skill/SKILL.md` | `claude/skill/CLAUDE.md` |
 | **Config** | `~/.config/opencode/opencode.json` | `~/.claude/claude.json` |
 

@@ -2,30 +2,33 @@
 set -euo pipefail
 
 # ilnamiqui uninstaller
-# Usage: bash scripts/uninstall.sh [--target opencode|claude|all] [--dry-run] [--quiet] [--help]
+# Removes all ilnamiqui components for both opencode and Claude Code.
+# Usage: bash scripts/uninstall.sh [--dry-run] [--quiet] [--help]
 
 # ─── Paths (must match install.sh) ─────────────────────────────────────────────
-BIN_DIR=""
 OPENCODE_SKILL_DIR="${HOME}/.config/opencode/skills/ilnamiqui"
 OPENCODE_PLUGIN_PATH="${HOME}/.config/opencode/plugins/ilnamiqui.ts"
 OPENCODE_CONFIG="${HOME}/.config/opencode/opencode.json"
+OPENCODE_BIN_DIR="${HOME}/.config/opencode/plugins/ilnamiqui"
 CLAUDE_CONFIG="${HOME}/.claude/claude.json"
 CLAUDE_SKILL_DIR="${HOME}/.claude/skills/ilnamiqui"
+CLAUDE_BIN_DIR="${HOME}/.claude/plugins/ilnamiqui"
+CLAUDE_HOOKS_DIR="${HOME}/.claude/hooks/ilnamiqui"
+CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
+CLAUDE_HOME="${HOME}/.claude/CLAUDE.md"
 SYMLINK_PATH="${HOME}/.local/bin/ilnamiqui"
 
 # ─── Flags ─────────────────────────────────────────────────────────────────────
 DRY_RUN=false
 QUIET=false
-TARGET="all"
 
-# ─── Helpers ───────────────────────────────────────────────────────────────────
+# ─── Helpers (POSIX-safe) ──────────────────────────────────────────────────────
 usage() {
-  echo "Usage: $0 [--target opencode|claude|all] [--dry-run] [--quiet] [--help]"
+  echo "Usage: $0 [--dry-run] [--quiet] [--help]"
   echo ""
-  echo "Remove ilnamiqui from assistant configurations."
+  echo "Remove all ilnamiqui components (opencode + Claude Code)."
   echo ""
   echo "Flags:"
-  echo "  --target    What to remove: opencode, claude, or all (default: all)"
   echo "  --dry-run   Print what would be deleted, don't actually delete"
   echo "  --quiet     Suppress info messages, only show errors"
   echo "  --help      Print this usage"
@@ -48,18 +51,39 @@ error() {
   echo "  ERROR: $1" >&2
 }
 
-# ─── Detect TTY & Parse flags ─────────────────────────────────────────────────
-IS_TTY=false
-if [ -t 0 ]; then
-  IS_TTY=true
-fi
+remove_dir() {
+  local path="$1" label="$2"
+  if [ -d "$path" ]; then
+    action "Removing ${label}: ${path}"
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would run: rm -rf ${path}"
+    else
+      rm -rf "$path"
+      info "Removed ${path}"
+    fi
+  else
+    info "${label} not found, skipping: ${path}"
+  fi
+}
 
+remove_file() {
+  local path="$1" label="$2"
+  if [ -f "$path" ] || [ -L "$path" ]; then
+    action "Removing ${label}: ${path}"
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would run: rm -f ${path}"
+    else
+      rm -f "$path"
+      info "Removed ${path}"
+    fi
+  else
+    info "${label} not found, skipping: ${path}"
+  fi
+}
+
+# ─── Parse flags ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --target)
-      TARGET="$2"
-      shift 2
-      ;;
     --dry-run)
       DRY_RUN=true
       shift
@@ -78,205 +102,100 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ─── Resolve target when interactive ──────────────────────────────────────────
-if [ "$TARGET" = "all" ] && [ "$IS_TTY" = true ] && [ $# -eq 0 ]; then
-  # Only prompt if --target was not explicitly provided
-  echo ""
-  echo "Which assistant to uninstall?"
-  echo "  1) opencode"
-  echo "  2) Claude Code"
-  echo "  3) Both (default)"
-  read -p "Select [3]: " choice
-  echo ""
-  case "$choice" in
-    1|opencode) TARGET="opencode" ;;
-    2|claude) TARGET="claude" ;;
-    *) TARGET="all" ;;
-  esac
-fi
-
-# Validate target
-if [ "$TARGET" != "opencode" ] && [ "$TARGET" != "claude" ] && [ "$TARGET" != "all" ]; then
-  error "Invalid target '$TARGET'. Use 'opencode', 'claude', or 'all'."
-  exit 1
-fi
-
-# Set BIN_DIR based on target
-case "$TARGET" in
-  opencode)
-    BIN_DIR="${HOME}/.config/opencode/plugins/ilnamiqui"
-    ;;
-  claude)
-    BIN_DIR="${HOME}/.claude/plugins/ilnamiqui"
-    ;;
-  all)
-    # BIN_DIR not set for 'all' - we handle both paths separately
-    ;;
-esac
-
 # ─── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "  ilnamiqui uninstaller"
-echo "  Target: $TARGET"
+echo "  Removing all components (opencode + Claude Code)"
 echo ""
 
-# ── Remove opencode components ─────────────────────────────────────────────────
-if [ "$TARGET" = "opencode" ] || [ "$TARGET" = "all" ]; then
-  # 1. Remove skill directory
-  if [ -d "$OPENCODE_SKILL_DIR" ]; then
-    action "Removing opencode skill directory: ${OPENCODE_SKILL_DIR}"
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would run: rm -rf ${OPENCODE_SKILL_DIR}"
-    else
-      rm -rf "$OPENCODE_SKILL_DIR"
-      info "Removed ${OPENCODE_SKILL_DIR}"
-    fi
-  else
-    info "Opencode skill directory not found, skipping: ${OPENCODE_SKILL_DIR}"
-  fi
+# ── Opencode components ────────────────────────────────────────────────────────
+echo "  ── opencode ──"
+remove_dir "$OPENCODE_SKILL_DIR" "skill directory"
+remove_file "$OPENCODE_PLUGIN_PATH" "plugin file"
+remove_dir "$OPENCODE_BIN_DIR" "binary directory"
 
-  # 2. Remove plugin file
-  if [ -f "$OPENCODE_PLUGIN_PATH" ] || [ -L "$OPENCODE_PLUGIN_PATH" ]; then
-    action "Removing opencode plugin file: ${OPENCODE_PLUGIN_PATH}"
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would run: rm -f ${OPENCODE_PLUGIN_PATH}"
-    else
-      rm -f "$OPENCODE_PLUGIN_PATH"
-      info "Removed ${OPENCODE_PLUGIN_PATH}"
-    fi
+# Remove plugin + MCP entries from opencode.json
+if [ -f "$OPENCODE_CONFIG" ]; then
+  action "Updating opencode.json..."
+  if [ "$DRY_RUN" = true ]; then
+    info "[dry-run] Would remove plugin + mcp entries from ${OPENCODE_CONFIG}"
   else
-    info "Opencode plugin file not found, skipping: ${OPENCODE_PLUGIN_PATH}"
-  fi
-
-  # 3. Remove plugin entry from opencode.json
-  if [ -f "$OPENCODE_CONFIG" ]; then
-    action "Updating opencode.json..."
     PLUGIN_ENTRY="./plugins/ilnamiqui.ts"
-
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would remove plugin entry '${PLUGIN_ENTRY}' from ${OPENCODE_CONFIG}"
-    else
-      if command -v jq &>/dev/null; then
-        tmp=$(mktemp /tmp/ilnamiqui-uninstall.XXXXXXXX)
-        if jq --arg p "$PLUGIN_ENTRY" '
-          if .plugin then
-            .plugin -= [$p] | if .plugin == [] then del(.plugin) else . end
-          else
-            .
-          end
-        ' "$OPENCODE_CONFIG" > "$tmp" 2>/dev/null; then
-          mv "$tmp" "$OPENCODE_CONFIG"
-          info "Updated using jq"
-        else
-          rm -f "$tmp"
-          error "jq failed to parse ${OPENCODE_CONFIG}"
-          exit 1
-        fi
-
-      elif command -v node &>/dev/null; then
-        node -e "
-          const fs = require('fs');
-          const cfgPath = '${OPENCODE_CONFIG}';
-          let cfg;
-          try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')); }
-          catch(e) { process.stderr.write('ERROR: Failed to parse ' + cfgPath + '\n'); process.exit(1); }
-          const entry = '${PLUGIN_ENTRY}';
-          if (cfg.plugin && Array.isArray(cfg.plugin)) {
-            cfg.plugin = cfg.plugin.filter(p => p !== entry);
-            if (cfg.plugin.length === 0) delete cfg.plugin;
-          }
-          fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
-        " 2>/dev/null || {
-          error "node script failed"
-          exit 1
-        }
-        info "Updated using node"
-
-      elif command -v python3 &>/dev/null; then
-        python3 -c "
-import json, os
-cfg_path = '${OPENCODE_CONFIG}'
-try:
-    with open(cfg_path) as f:
-        cfg = json.load(f)
-except FileNotFoundError:
-    cfg = {}
-except json.JSONDecodeError as e:
-    import sys
-    sys.stderr.write(f'ERROR: Failed to parse {cfg_path}: {e}\n')
-    sys.exit(1)
-entry = '${PLUGIN_ENTRY}'
-if 'plugin' in cfg and isinstance(cfg['plugin'], list):
-    cfg['plugin'] = [p for p in cfg['plugin'] if p != entry]
-    if not cfg['plugin']:
-        del cfg['plugin']
-with open(cfg_path, 'w') as f:
-    json.dump(cfg, f, indent=2)
-    f.write('\n')
-" 2>/dev/null || {
-          error "python3 script failed"
-          exit 1
-        }
-        info "Updated using python3"
-
+    if command -v jq &>/dev/null; then
+      tmp=$(mktemp /tmp/ilnamiqui-uninstall.XXXXXXXX)
+      if jq --arg p "$PLUGIN_ENTRY" '
+        if .plugin then .plugin -= [$p] | if .plugin == [] then del(.plugin) else . end else . end |
+        del(.mcp["ilnamiqui"]) | if .mcp == {} then del(.mcp) else . end
+      ' "$OPENCODE_CONFIG" > "$tmp" 2>/dev/null; then
+        mv "$tmp" "$OPENCODE_CONFIG"
+        info "Updated opencode.json using jq"
       else
-        error "Neither jq, node, nor python3 found. Cannot update ${OPENCODE_CONFIG}"
-        error "Remove this entry manually from ${OPENCODE_CONFIG}:"
-        error "  \"plugin\": [\"${PLUGIN_ENTRY}\"]"
-        exit 1
+        rm -f "$tmp"
+        error "jq failed to parse ${OPENCODE_CONFIG}"
       fi
+    elif command -v python3 &>/dev/null; then
+      python3 -c "
+import json
+file = '${OPENCODE_CONFIG}'
+try:
+    with open(file) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    exit(0)
+entry = '${PLUGIN_ENTRY}'
+if 'plugin' in data and isinstance(data['plugin'], list):
+    data['plugin'] = [p for p in data['plugin'] if p != entry]
+    if not data['plugin']:
+        del data['plugin']
+if 'mcp' in data and 'ilnamiqui' in data['mcp']:
+    del data['mcp']['ilnamiqui']
+    if not data['mcp']:
+        del data['mcp']
+with open(file, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" 2>/dev/null || error "python3 script failed"
+      info "Updated opencode.json using python3"
+    else
+      error "Neither jq nor python3 found. Update ${OPENCODE_CONFIG} manually"
     fi
-  else
-    info "Opencode config not found, skipping: ${OPENCODE_CONFIG}"
   fi
+else
+  info "opencode.json not found, skipping: ${OPENCODE_CONFIG}"
 fi
 
-# ── Remove claude components ───────────────────────────────────────────────────
-if [ "$TARGET" = "claude" ] || [ "$TARGET" = "all" ]; then
-  # 1. Remove skill directory
-  if [ -d "$CLAUDE_SKILL_DIR" ]; then
-    action "Removing claude skill directory: ${CLAUDE_SKILL_DIR}"
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would run: rm -rf ${CLAUDE_SKILL_DIR}"
-    else
-      rm -rf "$CLAUDE_SKILL_DIR"
-      info "Removed ${CLAUDE_SKILL_DIR}"
-    fi
+# ── Claude Code components ─────────────────────────────────────────────────────
+echo ""
+echo "  ── Claude Code ──"
+remove_dir "$CLAUDE_SKILL_DIR" "skill directory"
+remove_dir "$CLAUDE_BIN_DIR" "binary directory"
+remove_dir "$CLAUDE_HOOKS_DIR" "hooks directory"
+
+# Remove MCP entry from claude.json
+if [ -f "$CLAUDE_CONFIG" ]; then
+  action "Updating claude.json..."
+  if [ "$DRY_RUN" = true ]; then
+    info "[dry-run] Would remove mcpServers.ilnamiqui from ${CLAUDE_CONFIG}"
   else
-    info "Claude skill directory not found, skipping: ${CLAUDE_SKILL_DIR}"
-  fi
-
-  # 2. Remove MCP server entry from claude.json
-  if [ -f "$CLAUDE_CONFIG" ]; then
-    action "Updating claude.json..."
-    if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would remove mcpServers.ilnamiqui from ${CLAUDE_CONFIG}"
-    else
-      if command -v jq &>/dev/null; then
-        tmp=$(mktemp /tmp/ilnamiqui-uninstall.XXXXXXXX)
-        if jq 'del(.mcpServers["ilnamiqui"]) | if .mcpServers == {} then del(.mcpServers) else . end' \
-          "$CLAUDE_CONFIG" > "$tmp" 2>/dev/null; then
-          mv "$tmp" "$CLAUDE_CONFIG"
-          info "Updated ${CLAUDE_CONFIG} using jq"
-        else
-          rm -f "$tmp"
-          error "jq failed to update ${CLAUDE_CONFIG}"
-          exit 1
-        fi
-
-      elif command -v python3 &>/dev/null; then
-        python3 -c "
+    if command -v jq &>/dev/null; then
+      tmp=$(mktemp /tmp/ilnamiqui-uninstall.XXXXXXXX)
+      if jq 'del(.mcpServers["ilnamiqui"]) | if .mcpServers == {} then del(.mcpServers) else . end' \
+        "$CLAUDE_CONFIG" > "$tmp" 2>/dev/null; then
+        mv "$tmp" "$CLAUDE_CONFIG"
+        info "Updated claude.json using jq"
+      else
+        rm -f "$tmp"
+        error "jq failed to parse ${CLAUDE_CONFIG}"
+      fi
+    elif command -v python3 &>/dev/null; then
+      python3 -c "
 import json
 file = '${CLAUDE_CONFIG}'
 try:
     with open(file) as f:
         data = json.load(f)
-except FileNotFoundError:
-    data = {}
-except json.JSONDecodeError as e:
-    import sys
-    sys.stderr.write(f'ERROR: Failed to parse {file}: {e}\n')
-    sys.exit(1)
+except (FileNotFoundError, json.JSONDecodeError):
+    exit(0)
 if 'mcpServers' in data and 'ilnamiqui' in data['mcpServers']:
     del data['mcpServers']['ilnamiqui']
     if not data['mcpServers']:
@@ -284,134 +203,112 @@ if 'mcpServers' in data and 'ilnamiqui' in data['mcpServers']:
 with open(file, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')
-" 2>/dev/null || {
-          error "python3 script failed"
-          exit 1
-        }
-        info "Updated ${CLAUDE_CONFIG} using python3"
-
-      else
-        error "Neither jq nor python3 found. Cannot update ${CLAUDE_CONFIG}"
-        error "Remove this entry manually from ${CLAUDE_CONFIG}:"
-        error '  "mcpServers": { "ilnamiqui": { ... } }'
-        exit 1
-      fi
+" 2>/dev/null || error "python3 script failed"
+      info "Updated claude.json using python3"
+    else
+      error "Neither jq nor python3 found. Update ${CLAUDE_CONFIG} manually"
     fi
-  else
-    info "Claude config not found, skipping: ${CLAUDE_CONFIG}"
   fi
+else
+  info "claude.json not found, skipping: ${CLAUDE_CONFIG}"
+fi
 
-  # 3. Remove skill reference from CLAUDE.md
-  echo ""
-  action "Removing skill reference from CLAUDE.md..."
-  CLAUDE_HOME="${HOME}/.claude/CLAUDE.md"
-  INCLUDE_LINE="@skills/ilnamiqui/SKILL.md"
+# Remove ilnamiqui hooks from settings.json
+if [ -f "$CLAUDE_SETTINGS" ]; then
+  action "Updating settings.json..."
+  if [ "$DRY_RUN" = true ]; then
+    info "[dry-run] Would remove ilnamiqui hooks from ${CLAUDE_SETTINGS}"
+  else
+    if command -v jq &>/dev/null; then
+      tmp=$(mktemp /tmp/ilnamiqui-uninstall.XXXXXXXX)
+      if jq '
+        if .hooks then
+          .hooks["SessionStart"] |= [.[] | select(.hooks[0].command | test("ilnamiqui") | not)] |
+          if .hooks["SessionStart"] == [] then del(.hooks["SessionStart"]) else . end |
+          .hooks["PreCompact"] |= [.[] | select(.hooks[0].command | test("ilnamiqui") | not)] |
+          if .hooks["PreCompact"] == [] then del(.hooks["PreCompact"]) else . end |
+          .hooks["PostCompact"] |= [.[] | select(.hooks[0].command | test("ilnamiqui") | not)] |
+          if .hooks["PostCompact"] == [] then del(.hooks["PostCompact"]) else . end |
+          .hooks["SessionEnd"] |= [.[] | select(.hooks[0].command | test("ilnamiqui") | not)] |
+          if .hooks["SessionEnd"] == [] then del(.hooks["SessionEnd"]) else . end |
+          if .hooks == {} then del(.hooks) else . end
+        else
+          .
+        end
+      ' "$CLAUDE_SETTINGS" > "$tmp" 2>/dev/null; then
+        mv "$tmp" "$CLAUDE_SETTINGS"
+        info "Updated settings.json using jq"
+      else
+        rm -f "$tmp"
+        error "jq failed to parse ${CLAUDE_SETTINGS}"
+      fi
+    elif command -v python3 &>/dev/null; then
+      python3 -c "
+import json
+file = '${CLAUDE_SETTINGS}'
+try:
+    with open(file) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    exit(0)
+if 'hooks' in data:
+    for event in list(data['hooks'].keys()):
+        if isinstance(data['hooks'][event], list):
+            data['hooks'][event] = [g for g in data['hooks'][event] if not any(
+                isinstance(h, dict) and 'ilnamiqui' in h.get('command', '') for h in g.get('hooks', [])
+            )]
+            if not data['hooks'][event]:
+                del data['hooks'][event]
+    if not data['hooks']:
+        del data['hooks']
+with open(file, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" 2>/dev/null || error "python3 script failed"
+      info "Updated settings.json using python3"
+    else
+      error "Neither jq nor python3 found. Update ${CLAUDE_SETTINGS} manually"
+    fi
+  fi
+else
+  info "settings.json not found, skipping: ${CLAUDE_SETTINGS}"
+fi
+
+# Remove skill reference from CLAUDE.md
+INCLUDE_LINE="@skills/ilnamiqui/SKILL.md"
+if [ -f "$CLAUDE_HOME" ]; then
+  action "Updating CLAUDE.md..."
   if [ "$DRY_RUN" = true ]; then
     info "[dry-run] Would remove '${INCLUDE_LINE}' from ${CLAUDE_HOME}"
   else
-    if [ -f "$CLAUDE_HOME" ]; then
-      if grep -Fxq "$INCLUDE_LINE" "$CLAUDE_HOME" 2>/dev/null; then
-        tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
-        grep -Fxv "$INCLUDE_LINE" "$CLAUDE_HOME" > "$tmp" 2>/dev/null || true
-        if [ -s "$tmp" ]; then
-          mv "$tmp" "$CLAUDE_HOME"
-          info "Removed skill reference from ${CLAUDE_HOME}"
-        else
-          mv "$tmp" "$CLAUDE_HOME"
-          rm -f "$CLAUDE_HOME"
-          info "Removed empty ${CLAUDE_HOME}"
-        fi
+    if grep -Fxq "$INCLUDE_LINE" "$CLAUDE_HOME" 2>/dev/null; then
+      tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
+      grep -Fxv "$INCLUDE_LINE" "$CLAUDE_HOME" > "$tmp" 2>/dev/null || true
+      if [ -s "$tmp" ]; then
+        mv "$tmp" "$CLAUDE_HOME"
+        info "Removed skill reference from CLAUDE.md"
       else
-        info "Skill reference not found in ${CLAUDE_HOME}, skipping"
+        mv "$tmp" "$CLAUDE_HOME"
+        rm -f "$CLAUDE_HOME"
+        info "Removed empty CLAUDE.md"
       fi
     else
-      info "CLAUDE.md not found, skipping"
+      info "Skill reference not found in CLAUDE.md, skipping"
     fi
   fi
-fi
-
-# ── Remove binary directories ──────────────────────────────────────────────────
-case "$TARGET" in
-  opencode)
-    # Remove binary directory
-    if [ -d "$BIN_DIR" ]; then
-      action "Removing binary directory: ${BIN_DIR}"
-      if [ "$DRY_RUN" = true ]; then
-        info "[dry-run] Would run: rm -rf ${BIN_DIR}"
-      else
-        rm -rf "$BIN_DIR"
-        info "Removed ${BIN_DIR}"
-      fi
-    else
-      info "Binary directory not found, skipping: ${BIN_DIR}"
-    fi
-
-    # Remove CLI symlink
-    if [ -f "$SYMLINK_PATH" ] || [ -L "$SYMLINK_PATH" ]; then
-      action "Removing CLI symlink: ${SYMLINK_PATH}"
-      if [ "$DRY_RUN" = true ]; then
-        info "[dry-run] Would run: rm -f ${SYMLINK_PATH}"
-      else
-        rm -f "$SYMLINK_PATH"
-        info "Removed ${SYMLINK_PATH}"
-      fi
-    else
-      info "CLI symlink not found, skipping: ${SYMLINK_PATH}"
-    fi
-    ;;
-  claude)
-    if [ -d "$BIN_DIR" ]; then
-      action "Removing binary directory: ${BIN_DIR}"
-      if [ "$DRY_RUN" = true ]; then
-        info "[dry-run] Would run: rm -rf ${BIN_DIR}"
-      else
-        rm -rf "$BIN_DIR"
-        info "Removed ${BIN_DIR}"
-      fi
-    else
-      info "Binary directory not found, skipping: ${BIN_DIR}"
-    fi
-    ;;
-  all)
-    for dir in "${HOME}/.config/opencode/plugins/ilnamiqui" "${HOME}/.claude/plugins/ilnamiqui"; do
-      if [ -d "$dir" ]; then
-        action "Removing binary directory: ${dir}"
-        if [ "$DRY_RUN" = true ]; then
-          info "[dry-run] Would run: rm -rf ${dir}"
-        else
-          rm -rf "$dir"
-          info "Removed ${dir}"
-        fi
-      else
-        info "Binary directory not found, skipping: ${dir}"
-      fi
-    done
-
-    # Remove CLI symlink
-    if [ -f "$SYMLINK_PATH" ] || [ -L "$SYMLINK_PATH" ]; then
-      action "Removing CLI symlink: ${SYMLINK_PATH}"
-      if [ "$DRY_RUN" = true ]; then
-        info "[dry-run] Would run: rm -f ${SYMLINK_PATH}"
-      else
-        rm -f "$SYMLINK_PATH"
-        info "Removed ${SYMLINK_PATH}"
-      fi
-    else
-      info "CLI symlink not found, skipping: ${SYMLINK_PATH}"
-    fi
-    ;;
-esac
-
-# 5. Success message
-echo ""
-echo "  ✓ ilnamiqui uninstalled for target: ${TARGET}"
-if [ "$TARGET" = "opencode" ]; then
-  echo "  Restart opencode to complete."
-elif [ "$TARGET" = "claude" ]; then
-  echo "  Restart Claude Code to complete."
 else
-  echo "  Restart opencode or Claude Code to complete."
+  info "CLAUDE.md not found, skipping"
 fi
+
+# ── Shared components (symlink) ────────────────────────────────────────────────
+echo ""
+echo "  ── shared ──"
+remove_file "$SYMLINK_PATH" "CLI symlink"
+
+# ── Done ───────────────────────────────────────────────────────────────────────
+echo ""
+echo "  ✓ ilnamiqui uninstalled"
+echo "  Restart opencode or Claude Code to complete."
 echo ""
 
 exit 0

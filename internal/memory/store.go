@@ -114,6 +114,29 @@ func (s *Store) SearchEntries(ctx context.Context, queryStr string, mode SearchM
 	return s.queryEntries(ctx, query, args...)
 }
 
+// UpdateKeyCritical sets the critical flag on a key and refreshes last_used_at.
+func (s *Store) UpdateKeyCritical(ctx context.Context, key string, critical bool) error {
+	crit := 0
+	if critical {
+		crit = 1
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE memory_keys SET critical = ?, last_used_at = ? WHERE key = ?`,
+		crit, time.Now().UTC().Format(time.RFC3339), key,
+	)
+	if err != nil {
+		return fmt.Errorf("update key critical: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update key critical rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("key %q not found", key)
+	}
+	return nil
+}
+
 // ListKeys returns all distinct keys ordered by critical DESC, last_used_at DESC.
 // If limit > 0, at most limit keys are returned.
 func (s *Store) ListKeys(ctx context.Context, limit int) ([]KeyInfo, error) {
@@ -142,6 +165,47 @@ func (s *Store) DeleteEntry(ctx context.Context, id int64) error {
 		return fmt.Errorf("delete entry %d: not found", id)
 	}
 	return nil
+}
+
+// PruneEntries deletes memory entries older than `before` that belong to non-critical keys.
+// If key is "*" or empty, all non-critical keys are pruned. Otherwise only that key.
+// FTS5 cleanup is automatic via ON DELETE trigger.
+// Returns count of deleted rows.
+func (s *Store) PruneEntries(ctx context.Context, before time.Time, key string) (int, error) {
+	query := `
+        DELETE FROM memory_entries
+        WHERE created_at < ?
+          AND key NOT IN (SELECT key FROM memory_keys WHERE critical = 1)
+          AND (? = '*' OR key = ?)
+    `
+	res, err := s.db.ExecContext(ctx, query, before.UTC().Format(time.RFC3339), key, key)
+	if err != nil {
+		return 0, fmt.Errorf("prune entries: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("prune entries rows affected: %w", err)
+	}
+	return int(rows), nil
+}
+
+// CleanupOrphanKeys removes non-critical keys from memory_keys that have no
+// remaining entries in memory_entries. Returns count of cleaned rows.
+func (s *Store) CleanupOrphanKeys(ctx context.Context) (int, error) {
+	query := `
+        DELETE FROM memory_keys
+        WHERE key NOT IN (SELECT DISTINCT key FROM memory_entries)
+          AND critical = 0
+    `
+	res, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup orphan keys: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("cleanup orphan keys rows affected: %w", err)
+	}
+	return int(rows), nil
 }
 
 // queryEntries is a helper to scan rows into MemoryEntry slices.

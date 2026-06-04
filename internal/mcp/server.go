@@ -114,6 +114,35 @@ func (h *Handler) RegisterTools(s *server.MCPServer) {
 		),
 		h.handleListKeys,
 	)
+
+	s.AddTool(
+		mcp.NewTool("update_key",
+			mcp.WithDescription("Update the critical flag on a memory key. Critical keys are protected from prune."),
+			mcp.WithString("key",
+				mcp.Required(),
+				mcp.Description("The key name to update"),
+			),
+			mcp.WithBoolean("critical",
+				mcp.Required(),
+				mcp.Description("New critical value (true = protected from prune)"),
+			),
+		),
+		h.handleKeyUpdate,
+	)
+
+	s.AddTool(
+		mcp.NewTool("prune_memories",
+			mcp.WithDescription("Delete non-critical memory entries older than the given date. Optionally filter by key. Cleans up orphaned memory key records."),
+			mcp.WithString("before",
+				mcp.Required(),
+				mcp.Description("Date threshold (RFC3339). Entries older than this date and belonging to non-critical keys are deleted"),
+			),
+			mcp.WithString("key",
+				mcp.Description("Specific key to prune. Omit or set to '*' to prune all non-critical keys"),
+			),
+		),
+		h.handlePrune,
+	)
 }
 
 func errResult(msg string) *mcp.CallToolResult {
@@ -236,6 +265,45 @@ func (h *Handler) handleListKeys(ctx context.Context, req mcp.CallToolRequest) (
 		return errResult(err.Error()), nil
 	}
 	return mcp.NewToolResultText(formatKeys(resp.Keys)), nil
+}
+
+func (h *Handler) handleKeyUpdate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	key := req.GetString("key", "")
+	if key == "" {
+		return errResult("missing required parameter 'key'"), nil
+	}
+
+	critical := req.GetBool("critical", false)
+
+	_, err := h.svc.KeyUpdate(ctx, &service.KeyUpdateRequest{Key: key, Critical: critical})
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+
+	result := fmt.Sprintf("updated key %q: critical=%v", key, critical)
+	return mcp.NewToolResultText(result), nil
+}
+
+func (h *Handler) handlePrune(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	beforeStr := req.GetString("before", "")
+	if beforeStr == "" {
+		return errResult("missing required parameter 'before'"), nil
+	}
+
+	beforeTime, err := time.Parse(time.RFC3339, beforeStr)
+	if err != nil {
+		return errResult(fmt.Sprintf("invalid 'before': expected RFC3339 format, got %q", beforeStr)), nil
+	}
+
+	key := req.GetString("key", "*")
+
+	resp, err := h.svc.Prune(ctx, &service.PruneRequest{Before: beforeTime, Key: key})
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+
+	result := fmt.Sprintf("Pruned %d entries, cleaned %d orphan keys", resp.Deleted, resp.OrphansCleaned)
+	return mcp.NewToolResultText(result), nil
 }
 
 // formatEntries formats memory entries as a text table.

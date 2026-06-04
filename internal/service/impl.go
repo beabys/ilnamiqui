@@ -207,6 +207,32 @@ func (s *serviceImpl) Search(ctx context.Context, req *SearchRequest) (*SearchRe
 	return &SearchResponse{Entries: entries}, nil
 }
 
+// Prune deletes non-critical memory entries older than the given date.
+func (s *serviceImpl) Prune(ctx context.Context, req *PruneRequest) (*PruneResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensureDB(); err != nil {
+		return nil, err
+	}
+
+	key := req.Key
+	if key == "" {
+		key = "*"
+	}
+
+	deleted, err := s.store.PruneEntries(ctx, req.Before, key)
+	if err != nil {
+		return nil, fmt.Errorf("prune: %w", err)
+	}
+
+	orphans, err := s.store.CleanupOrphanKeys(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cleanup orphan keys: %w", err)
+	}
+
+	return &PruneResponse{Deleted: deleted, OrphansCleaned: orphans}, nil
+}
+
 // ListSessions lists recent sessions for the project.
 func (s *serviceImpl) ListSessions(ctx context.Context, req *ListSessionsRequest) (*ListSessionsResponse, error) {
 	s.mu.Lock()
@@ -233,6 +259,19 @@ func (s *serviceImpl) ListKeys(ctx context.Context, req *ListKeysRequest) (*List
 		return nil, fmt.Errorf("list keys: %w", err)
 	}
 	return &ListKeysResponse{Keys: keys}, nil
+}
+
+// KeyUpdate updates the critical flag on a memory key.
+func (s *serviceImpl) KeyUpdate(ctx context.Context, req *KeyUpdateRequest) (*KeyUpdateResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensureDB(); err != nil {
+		return nil, err
+	}
+	if err := s.store.UpdateKeyCritical(ctx, req.Key, req.Critical); err != nil {
+		return nil, fmt.Errorf("key update: %w", err)
+	}
+	return &KeyUpdateResponse{}, nil
 }
 
 // Delete deletes a memory entry by ID.

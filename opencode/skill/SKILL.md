@@ -103,6 +103,58 @@ ilnamiqui load --pretty                # refresh all context
 
 ---
 
+---
+
+## Prune old memories
+
+Remove old non-critical memories to keep the database lean:
+
+```bash
+ilnamiqui prune --before 2026-04-01                  # all non-critical keys
+ilnamiqui prune --before 2026-04-01 --key test        # specific key only
+```
+
+**Behavior:**
+- Only deletes entries whose key is **not critical** (`critical = false` in `memory_keys`)
+- Critical keys (like `project-path`) are **never deleted** by prune
+- After deletion, orphaned `memory_keys` rows are auto-cleaned
+- `--before` is required (YYYY-MM-DD or RFC3339)
+- `--key` is optional — defaults to `*` (all non-critical keys)
+- If no matches, prints `0 deleted` — no error
+
+**Example sequence:**
+```bash
+ilnamiqui keys --pretty                              # see which keys are critical
+ilnamiqui prune --before 2026-04-01                  # delete old non-critical entries
+ilnamiqui prune --before 2026-04-01 --key test       # delete only key "test"
+```
+
+---
+
+## Protect keys from prune
+
+Mark a key as **critical** so prune never touches it:
+
+```bash
+ilnamiqui key update --critical testkey              # protect from prune
+ilnamiqui key update --critical=false testkey        # allow prune again
+```
+
+**Behavior:**
+- Updates the `critical` flag on an existing key
+- Critical keys are completely excluded from prune — no matter how old
+- If key doesn't exist, returns an error
+- Use `ilnamiqui keys --pretty` to see current flag status
+
+**Common workflow:**
+```bash
+ilnamiqui keys --pretty                              # check which keys are critical
+ilnamiqui key update --critical architecture         # protect architecture decisions
+ilnamiqui prune --before 2026-04-01                  # safe — skips critical keys
+```
+
+---
+
 ## On `/exit`
 
 Auto-saved by the plugin. Manual fallback:

@@ -286,6 +286,74 @@ func (_c *Service_Init_Call) RunAndReturn(run func(ctx context.Context, req *ser
 	return _c
 }
 
+// KeyUpdate provides a mock function for the type Service
+func (_mock *Service) KeyUpdate(ctx context.Context, req *service.KeyUpdateRequest) (*service.KeyUpdateResponse, error) {
+	ret := _mock.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for KeyUpdate")
+	}
+
+	var r0 *service.KeyUpdateResponse
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *service.KeyUpdateRequest) (*service.KeyUpdateResponse, error)); ok {
+		return returnFunc(ctx, req)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *service.KeyUpdateRequest) *service.KeyUpdateResponse); ok {
+		r0 = returnFunc(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*service.KeyUpdateResponse)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *service.KeyUpdateRequest) error); ok {
+		r1 = returnFunc(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Service_KeyUpdate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'KeyUpdate'
+type Service_KeyUpdate_Call struct {
+	*mock.Call
+}
+
+// KeyUpdate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *service.KeyUpdateRequest
+func (_e *Service_Expecter) KeyUpdate(ctx interface{}, req interface{}) *Service_KeyUpdate_Call {
+	return &Service_KeyUpdate_Call{Call: _e.mock.On("KeyUpdate", ctx, req)}
+}
+
+func (_c *Service_KeyUpdate_Call) Run(run func(ctx context.Context, req *service.KeyUpdateRequest)) *Service_KeyUpdate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *service.KeyUpdateRequest
+		if args[1] != nil {
+			arg1 = args[1].(*service.KeyUpdateRequest)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Service_KeyUpdate_Call) Return(keyUpdateResponse *service.KeyUpdateResponse, err error) *Service_KeyUpdate_Call {
+	_c.Call.Return(keyUpdateResponse, err)
+	return _c
+}
+
+func (_c *Service_KeyUpdate_Call) RunAndReturn(run func(ctx context.Context, req *service.KeyUpdateRequest) (*service.KeyUpdateResponse, error)) *Service_KeyUpdate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListKeys provides a mock function for the type Service
 func (_mock *Service) ListKeys(ctx context.Context, req *service.ListKeysRequest) (*service.ListKeysResponse, error) {
 	ret := _mock.Called(ctx, req)
@@ -486,6 +554,74 @@ func (_c *Service_Load_Call) Return(loadResponse *service.LoadResponse, err erro
 }
 
 func (_c *Service_Load_Call) RunAndReturn(run func(ctx context.Context, req *service.LoadRequest) (*service.LoadResponse, error)) *Service_Load_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Prune provides a mock function for the type Service
+func (_mock *Service) Prune(ctx context.Context, req *service.PruneRequest) (*service.PruneResponse, error) {
+	ret := _mock.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prune")
+	}
+
+	var r0 *service.PruneResponse
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *service.PruneRequest) (*service.PruneResponse, error)); ok {
+		return returnFunc(ctx, req)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *service.PruneRequest) *service.PruneResponse); ok {
+		r0 = returnFunc(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*service.PruneResponse)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *service.PruneRequest) error); ok {
+		r1 = returnFunc(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Service_Prune_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prune'
+type Service_Prune_Call struct {
+	*mock.Call
+}
+
+// Prune is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *service.PruneRequest
+func (_e *Service_Expecter) Prune(ctx interface{}, req interface{}) *Service_Prune_Call {
+	return &Service_Prune_Call{Call: _e.mock.On("Prune", ctx, req)}
+}
+
+func (_c *Service_Prune_Call) Run(run func(ctx context.Context, req *service.PruneRequest)) *Service_Prune_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *service.PruneRequest
+		if args[1] != nil {
+			arg1 = args[1].(*service.PruneRequest)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Service_Prune_Call) Return(pruneResponse *service.PruneResponse, err error) *Service_Prune_Call {
+	_c.Call.Return(pruneResponse, err)
+	return _c
+}
+
+func (_c *Service_Prune_Call) RunAndReturn(run func(ctx context.Context, req *service.PruneRequest) (*service.PruneResponse, error)) *Service_Prune_Call {
 	_c.Call.Return(run)
 	return _c
 }

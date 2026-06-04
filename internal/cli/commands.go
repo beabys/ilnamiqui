@@ -20,7 +20,9 @@ const (
 	LOAD    = "load"
 	LIST    = "list"
 	KEYS    = "keys"
+	KEY     = "key"
 	SEARCH  = "search"
+	PRUNE   = "prune"
 	DELETE  = "delete"
 	SESSION = "session"
 	VERSION = "version"
@@ -59,8 +61,12 @@ func (c *CLI) Run(args []string) error {
 		return c.cmdList(cmdArgs)
 	case KEYS:
 		return c.cmdKeys(cmdArgs)
+	case KEY:
+		return c.cmdKey(cmdArgs)
 	case SEARCH:
 		return c.cmdSearch(cmdArgs)
+	case PRUNE:
+		return c.cmdPrune(cmdArgs)
 	case DELETE:
 		return c.cmdDelete(cmdArgs)
 	case SESSION:
@@ -182,6 +188,42 @@ func (c *CLI) cmdKeys(args []string) error {
 	return printJSON(resp.Keys)
 }
 
+// cmdKey handles key subcommands.
+func (c *CLI) cmdKey(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ilnamiqui key <subcommand> [flags]")
+	}
+	sub := args[0]
+	subArgs := args[1:]
+	switch sub {
+	case "update":
+		return c.cmdKeyUpdate(subArgs)
+	default:
+		return fmt.Errorf("unknown key subcommand %q — use 'update'", sub)
+	}
+}
+
+func (c *CLI) cmdKeyUpdate(args []string) error {
+	fs := flag.NewFlagSet("key update", flag.ContinueOnError)
+	critical := fs.Bool("critical", false, "set critical flag (use --critical or --critical=true)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("usage: ilnamiqui key update [--critical[=true|false]] <keyname>")
+	}
+	key := fs.Arg(0)
+	_, err := c.svc.KeyUpdate(context.Background(), &service.KeyUpdateRequest{
+		Key:      key,
+		Critical: *critical,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("updated key %q: critical=%v\n", key, *critical)
+	return nil
+}
+
 // cmdSearch searches memory entries.
 func (c *CLI) cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
@@ -239,6 +281,32 @@ func (c *CLI) cmdSearch(args []string) error {
 		return printEntriesTable(resp.Entries)
 	}
 	return printJSON(resp.Entries)
+}
+
+// cmdPrune deletes non-critical memory entries older than the given date.
+func (c *CLI) cmdPrune(args []string) error {
+	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+	before := fs.String("before", "", "required — delete entries older than this date (YYYY-MM-DD or RFC3339)")
+	key := fs.String("key", "*", "key to prune (default: all non-critical keys)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *before == "" {
+		return fmt.Errorf("usage: ilnamiqui prune --before <date> [--key <key>]")
+	}
+	beforeTime, err := parseDate(*before)
+	if err != nil {
+		return fmt.Errorf("invalid --before: %w", err)
+	}
+	resp, err := c.svc.Prune(context.Background(), &service.PruneRequest{
+		Before: beforeTime,
+		Key:    *key,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("pruned %d entries, cleaned %d orphan keys\n", resp.Deleted, resp.OrphansCleaned)
+	return nil
 }
 
 // cmdDelete deletes a memory entry.
@@ -327,9 +395,13 @@ Commands:
                         Load memory entries (all or current session)
   list [--limit N]      List recent sessions
   keys [--limit N] [--pretty]
-                        List distinct memory keys
+                         List distinct memory keys
+  key update [--critical[=true|false]] <key>
+                        Update critical flag on a memory key (default: false)
   search <query> [--after DATE] [--before DATE] [--limit N]
-                        Search memory entries by key or value, optionally filtered by date
+                         Search memory entries by key or value, optionally filtered by date
+  prune --before <date> [--key <key>]
+                         Delete non-critical memory entries older than date
   delete <id>           Delete a memory entry by ID
   session start         Start a new session
   session end [--summary "text"]
