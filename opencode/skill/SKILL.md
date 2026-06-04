@@ -48,6 +48,23 @@ Otherwise skip.
 
 ---
 
+## Before you save — discover existing keys
+
+Call `keys` first to see which keys already exist in this project.
+Reuse existing keys so related context stays grouped together:
+
+```bash
+ilnamiqui keys --pretty
+```
+
+Example output:
+```
+Key             Critical  Last Used
+project-path    true      2026-06-04T10:30:00Z
+architecture    false     2026-06-04T10:30:00Z
+bug             false     2026-06-03T15:20:00Z
+```
+
 ## During conversation
 
 Save whenever notable context appears:
@@ -69,11 +86,20 @@ Keep values terse (one sentence). Same key appends.
 ## Queries
 
 ```bash
-ilnamiqui list --limit 5 --pretty     # recent sessions
-ilnamiqui search "<query>" --pretty               # search memories
-ilnamiqui search "<query>" --after 2026-01-01     # search by date range
-ilnamiqui load --pretty               # refresh all context
+ilnamiqui keys --limit 10 --pretty       # discover existing keys (+ critical flag)
+ilnamiqui list --limit 5 --pretty        # recent sessions
+ilnamiqui search "<query>" --pretty                  # search keys only (fast, uses index)
+ilnamiqui search "<query>" --mode content --pretty   # search content (FTS5 full-text)
+ilnamiqui search "<query>" --mode both --pretty       # search both keys and content
+ilnamiqui search "<query>" --after 2026-01-01         # search by date range
+ilnamiqui load --pretty                # refresh all context
 ```
+
+**Search behavior:**
+- **Default** (`--mode key`): searches **keys** using prefix match (`key LIKE "query%"`) — fast, uses B-tree index.
+- **`--mode content`**: searches **content/value** using FTS5 full-text search (token-aware, supports prefix with `*`) — ideal when key search isn't enough.
+- **`--mode both`**: searches both keys AND content.
+- **FTS5 tip**: content search is word-based. `ilnamiqui search "hex" --mode content` matches entries containing words starting with "hex" (hexagonal, hexagon). It is NOT substring LIKE — `ilnamiqui search "lago" --mode content` will NOT match "hexagonal".
 
 ---
 

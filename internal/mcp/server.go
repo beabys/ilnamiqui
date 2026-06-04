@@ -64,9 +64,12 @@ func (h *Handler) RegisterTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("search_memories",
-			mcp.WithDescription("Search memory entries by key or value, optionally filtered by date range"),
+			mcp.WithDescription("Search memory entries by key (default), content (FTS5), or both, optionally filtered by date range"),
 			mcp.WithString("query",
 				mcp.Description("Search query to match against key or value (optional if after or before is set)"),
+			),
+			mcp.WithString("mode",
+				mcp.Description("Search mode: key (default, uses index), content (value FTS5), both (key+content)"),
 			),
 			mcp.WithInteger("limit",
 				mcp.Description("Maximum number of results to return (default 10)"),
@@ -100,6 +103,16 @@ func (h *Handler) RegisterTools(s *server.MCPServer) {
 			),
 		),
 		h.handleDelete,
+	)
+
+	s.AddTool(
+		mcp.NewTool("list_keys",
+			mcp.WithDescription("List distinct memory keys in use, ordered by critical (critical first) then most recently used"),
+			mcp.WithInteger("limit",
+				mcp.Description("Maximum number of keys to return (default 50)"),
+			),
+		),
+		h.handleListKeys,
 	)
 }
 
@@ -156,9 +169,17 @@ func (h *Handler) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*m
 	limit := req.GetInt("limit", 10)
 	afterStr := req.GetString("after", "")
 	beforeStr := req.GetString("before", "")
+	mode := req.GetString("mode", "key")
 
 	if query == "" && afterStr == "" && beforeStr == "" {
 		return errResult("at least one of 'query', 'after', or 'before' is required"), nil
+	}
+
+	switch mode {
+	case "key", "content", "both":
+		// valid
+	default:
+		return errResult(fmt.Sprintf("invalid mode %q: must be key, content, or both", mode)), nil
 	}
 
 	var afterTime, beforeTime *time.Time
@@ -177,7 +198,7 @@ func (h *Handler) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*m
 		beforeTime = &t
 	}
 
-	resp, err := h.svc.Search(ctx, &service.SearchRequest{Query: query, Limit: limit, After: afterTime, Before: beforeTime})
+	resp, err := h.svc.Search(ctx, &service.SearchRequest{Query: query, Mode: memory.SearchMode(mode), Limit: limit, After: afterTime, Before: beforeTime})
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
@@ -207,6 +228,16 @@ func (h *Handler) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*m
 	return mcp.NewToolResultText(fmt.Sprintf("deleted entry %d", id)), nil
 }
 
+func (h *Handler) handleListKeys(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := req.GetInt("limit", 50)
+
+	resp, err := h.svc.ListKeys(ctx, &service.ListKeysRequest{Limit: limit})
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	return mcp.NewToolResultText(formatKeys(resp.Keys)), nil
+}
+
 // formatEntries formats memory entries as a text table.
 func formatEntries(entries []memory.MemoryEntry) string {
 	if len(entries) == 0 {
@@ -221,6 +252,22 @@ func formatEntries(entries []memory.MemoryEntry) string {
 		}
 		fmt.Fprintf(&b, "%-4d %-20s %-30s %-36s %s\n",
 			e.ID, e.Key, val, e.SessionID, e.CreatedAt.Format(time.RFC3339))
+	}
+	return b.String()
+}
+
+func formatKeys(keys []memory.KeyInfo) string {
+	if len(keys) == 0 {
+		return "no keys found"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-20s %-8s %s\n", "Key", "Critical", "Last Used")
+	for _, k := range keys {
+		critical := "false"
+		if k.Critical {
+			critical = "true"
+		}
+		fmt.Fprintf(&b, "%-20s %-8s %s\n", k.Key, critical, k.LastUsedAt.Format(time.RFC3339))
 	}
 	return b.String()
 }

@@ -46,9 +46,40 @@ func openTestDB(t *testing.T) *sql.DB {
 	);
 	CREATE INDEX IF NOT EXISTS idx_memory_session_id ON memory_entries(session_id);
 	CREATE INDEX IF NOT EXISTS idx_memory_key ON memory_entries(key);
+	CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+		key, value,
+		content=memory_entries,
+		content_rowid=id,
+		tokenize='unicode61'
+	);
+	CREATE TABLE IF NOT EXISTS memory_keys (
+		key          TEXT PRIMARY KEY,
+		last_used_at TEXT NOT NULL,
+		critical     INTEGER NOT NULL DEFAULT 0
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("create schema: %v", err)
+	}
+
+	const ftsTriggers = `
+	CREATE TRIGGER IF NOT EXISTS memory_fts_ai AFTER INSERT ON memory_entries BEGIN
+		INSERT INTO memory_fts (rowid, key, value) VALUES (new.id, new.key, new.value);
+	END;
+	CREATE TRIGGER IF NOT EXISTS memory_fts_ad AFTER DELETE ON memory_entries BEGIN
+		INSERT INTO memory_fts (memory_fts, rowid, key, value) VALUES ('delete', old.id, old.key, old.value);
+	END;
+	CREATE TRIGGER IF NOT EXISTS memory_fts_au AFTER UPDATE ON memory_entries BEGIN
+		INSERT INTO memory_fts (memory_fts, rowid, key, value) VALUES ('delete', old.id, old.key, old.value);
+		INSERT INTO memory_fts (rowid, key, value) VALUES (new.id, new.key, new.value);
+	END;
+	`
+	if _, err := db.Exec(ftsTriggers); err != nil {
+		t.Fatalf("create fts5 triggers: %v", err)
+	}
+
+	if _, err := db.Exec(memoryKeysTrigger); err != nil {
+		t.Fatalf("create memory keys trigger: %v", err)
 	}
 
 	// Insert a stub session
@@ -59,6 +90,14 @@ func openTestDB(t *testing.T) *sql.DB {
 
 	return db
 }
+
+const memoryKeysTrigger = `
+CREATE TRIGGER IF NOT EXISTS memory_keys_ai AFTER INSERT ON memory_entries BEGIN
+    INSERT INTO memory_keys (key, last_used_at) 
+    VALUES (new.key, new.created_at)
+    ON CONFLICT(key) DO UPDATE SET last_used_at = excluded.last_used_at;
+END;
+`
 
 func TestSaveEntry(t *testing.T) {
 	db := openTestDB(t)
@@ -176,8 +215,8 @@ func TestSearchEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Search by key
-	entries, err := store.SearchEntries(ctx, "architecture", 0, nil, nil)
+	// Search by key (both mode to match old behavior)
+	entries, err := store.SearchEntries(ctx, "architecture", SearchModeBoth, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -186,7 +225,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search by value
-	entries, err = store.SearchEntries(ctx, "hexagonal", 0, nil, nil)
+	entries, err = store.SearchEntries(ctx, "hexagonal", SearchModeBoth, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -195,7 +234,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search matching both key and value
-	entries, err = store.SearchEntries(ctx, "SQLite", 0, nil, nil)
+	entries, err = store.SearchEntries(ctx, "SQLite", SearchModeBoth, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -204,7 +243,7 @@ func TestSearchEntries(t *testing.T) {
 	}
 
 	// Search with no match
-	entries, err = store.SearchEntries(ctx, "nonexistent", 0, nil, nil)
+	entries, err = store.SearchEntries(ctx, "nonexistent", SearchModeBoth, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -322,6 +361,103 @@ func TestSQLInjection(t *testing.T) {
 	}
 }
 
+func TestListKeys(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// No entries yet — should return empty
+	keys, err := store.ListKeys(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListKeys error: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("expected 0 keys for empty DB, got %d", len(keys))
+	}
+
+	// Save entries with different keys
+	_, err = store.SaveEntry(ctx, "test-session", "alpha", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "beta", "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "alpha", "third")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err = store.ListKeys(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListKeys error: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 distinct keys, got %d", len(keys))
+	}
+
+	// Both keys should have critical=false by default
+	for _, k := range keys {
+		if k.Critical {
+			t.Fatalf("key %q should be non-critical by default", k.Key)
+		}
+	}
+}
+
+func TestListKeys_Limit(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	for _, k := range []string{"a", "b", "c"} {
+		_, err := store.SaveEntry(ctx, "test-session", k, "v")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	keys, err := store.ListKeys(ctx, 2)
+	if err != nil {
+		t.Fatalf("ListKeys error: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys with limit=2, got %d", len(keys))
+	}
+}
+
+func TestListKeys_OrderByRecency(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Insert entries with explicit created_at dates
+	// Using direct SQL to control timestamps
+	_, err := db.ExecContext(ctx, `INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+		"test-session", "old", "v", "2024-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+		"test-session", "new", "v", "2026-06-04T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := store.ListKeys(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListKeys error: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(keys))
+	}
+
+	// "new" should come first (most recent)
+	if keys[0].Key != "new" {
+		t.Fatalf("expected first key 'new' (most recent), got %q", keys[0].Key)
+	}
+}
+
 func TestLoadEntries_withLimit(t *testing.T) {
 	db := openTestDB(t)
 	store := NewStore(db)
@@ -392,7 +528,7 @@ func TestSearchEntries_withLimit(t *testing.T) {
 	}
 
 	// Search with limit 1
-	entries, err := store.SearchEntries(ctx, "test", 1, nil, nil)
+	entries, err := store.SearchEntries(ctx, "test", SearchModeBoth, 1, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries error: %v", err)
 	}
@@ -429,7 +565,7 @@ func TestSearchEntries_WithDateRange(t *testing.T) {
 	before := parseTime(t, "2027-06-01T00:00:00Z")
 
 	// Test: only date range, no query
-	results, err := store.SearchEntries(ctx, "", 0, &after, &before)
+	results, err := store.SearchEntries(ctx, "", SearchModeBoth, 0, &after, &before)
 	if err != nil {
 		t.Fatalf("SearchEntries date range: %v", err)
 	}
@@ -438,7 +574,7 @@ func TestSearchEntries_WithDateRange(t *testing.T) {
 	}
 
 	// Test: query + date range combined
-	results, err = store.SearchEntries(ctx, "mid", 0, &after, &before)
+	results, err = store.SearchEntries(ctx, "mid", SearchModeBoth, 0, &after, &before)
 	if err != nil {
 		t.Fatalf("SearchEntries query + date: %v", err)
 	}
@@ -447,7 +583,7 @@ func TestSearchEntries_WithDateRange(t *testing.T) {
 	}
 
 	// Test: only after, no before
-	results, err = store.SearchEntries(ctx, "", 0, &after, nil)
+	results, err = store.SearchEntries(ctx, "", SearchModeBoth, 0, &after, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries after only: %v", err)
 	}
@@ -457,7 +593,7 @@ func TestSearchEntries_WithDateRange(t *testing.T) {
 
 	// Test: date range with no matches
 	farFuture := parseTime(t, "2030-01-01T00:00:00Z")
-	results, err = store.SearchEntries(ctx, "", 0, &farFuture, nil)
+	results, err = store.SearchEntries(ctx, "", SearchModeBoth, 0, &farFuture, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries no match: %v", err)
 	}
@@ -466,12 +602,196 @@ func TestSearchEntries_WithDateRange(t *testing.T) {
 	}
 
 	// Test: no query, no date range — returns all
-	results, err = store.SearchEntries(ctx, "", 0, nil, nil)
+	results, err = store.SearchEntries(ctx, "", SearchModeBoth, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchEntries no filters: %v", err)
 	}
 	if len(results) != 3 {
 		t.Fatalf("expected 3 entries with no filters, got %d", len(results))
+	}
+}
+
+func TestSearchEntries_KeyModeDefault(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "architecture", "using hexagonal architecture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "architect", "team lead role")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "bug", "fix null pointer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Search with key mode — prefix match should find "architecture" and "architect"
+	entries, err := store.SearchEntries(ctx, "arch", SearchModeKey, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries matching 'arch*', got %d", len(entries))
+	}
+
+	// Exact prefix should not match "bug"
+	entries, err = store.SearchEntries(ctx, "bug", SearchModeKey, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for 'bug', got %d", len(entries))
+	}
+}
+
+func TestSearchEntries_ContentMode_FTS5(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "arch", "using hexagonal architecture pattern")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "bug", "fixed null pointer in handler")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// FTS5 search — word-based, "hexagonal" should match first entry
+	entries, err := store.SearchEntries(ctx, "hexagonal", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for 'hexagonal', got %d", len(entries))
+	}
+
+	// Prefix via FTS5: "hex*" should also match
+	entries, err = store.SearchEntries(ctx, "hex", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for 'hex*' FTS5 prefix, got %d", len(entries))
+	}
+
+	// No match
+	entries, err = store.SearchEntries(ctx, "nonexistent", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestSearchEntries_BothMode(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "architecture", "using hexagonal architecture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "bug", "hexagonal is not a bug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "note", "plain note")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// "hexagonal" appears in both key (architecture) and value (bug entry) — should find 2
+	entries, err := store.SearchEntries(ctx, "hexagonal", SearchModeBoth, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries for 'hexagonal' in both mode, got %d", len(entries))
+	}
+
+	// "architecture" matches key and value — should find 1 (key prefix match on "architecture")
+	entries, err = store.SearchEntries(ctx, "architecture", SearchModeBoth, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for 'architecture' in both mode, got %d", len(entries))
+	}
+}
+
+func TestToFTSQuery(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"hexagonal", "hexagonal*"},
+		{"hexagonal architecture", "hexagonal* architecture*"},
+		{"  spaced  words  ", "spaced* words*"},
+		{"", ""},
+		{"single", "single*"},
+	}
+	for _, tt := range tests {
+		got := toFTSQuery(tt.input)
+		if got != tt.expected {
+			t.Errorf("toFTSQuery(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestSearchEntries_DefaultModeIsKey(t *testing.T) {
+	// Verify that empty mode defaults to key search (prefix match, uses index)
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "architecture", "value about architecture")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Call with SearchModeKey explicitly — this is the default
+	entries, err := store.SearchEntries(ctx, "arch", SearchModeKey, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	// Searching by content should NOT match in key mode
+	entries, err = store.SearchEntries(ctx, "value about", SearchModeKey, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries (key mode doesn't search value), got %d", len(entries))
+	}
+}
+
+func TestSearchEntries_FTS5_NoMatch(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "key1", "some value here")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := store.SearchEntries(ctx, "zzzzzzz", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries for non-matching query, got %d", len(entries))
 	}
 }
 
@@ -566,9 +886,38 @@ func fileDB(t *testing.T) *sql.DB {
 		value      TEXT NOT NULL,
 		created_at TEXT NOT NULL DEFAULT (datetime('now'))
 	);
+	CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+		key, value,
+		content=memory_entries,
+		content_rowid=id,
+		tokenize='unicode61'
+	);
+	CREATE TABLE IF NOT EXISTS memory_keys (
+		key          TEXT PRIMARY KEY,
+		last_used_at TEXT NOT NULL,
+		critical     INTEGER NOT NULL DEFAULT 0
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("create schema: %v", err)
+	}
+	const ftsTriggers = `
+	CREATE TRIGGER IF NOT EXISTS memory_fts_ai AFTER INSERT ON memory_entries BEGIN
+		INSERT INTO memory_fts (rowid, key, value) VALUES (new.id, new.key, new.value);
+	END;
+	CREATE TRIGGER IF NOT EXISTS memory_fts_ad AFTER DELETE ON memory_entries BEGIN
+		INSERT INTO memory_fts (memory_fts, rowid, key, value) VALUES ('delete', old.id, old.key, old.value);
+	END;
+	CREATE TRIGGER IF NOT EXISTS memory_fts_au AFTER UPDATE ON memory_entries BEGIN
+		INSERT INTO memory_fts (memory_fts, rowid, key, value) VALUES ('delete', old.id, old.key, old.value);
+		INSERT INTO memory_fts (rowid, key, value) VALUES (new.id, new.key, new.value);
+	END;
+	`
+	if _, err := db.Exec(ftsTriggers); err != nil {
+		t.Fatalf("create fts5 triggers: %v", err)
+	}
+	if _, err := db.Exec(memoryKeysTrigger); err != nil {
+		t.Fatalf("create memory keys trigger: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO sessions (id, project, started_at) VALUES (?, ?, ?)`,
 		"test-session", "test-project", "2024-01-01T00:00:00Z"); err != nil {

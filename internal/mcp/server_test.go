@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,8 +24,8 @@ func TestHandler_RegisterTools(t *testing.T) {
 
 	// Verify tools are registered by calling ListTools
 	tools := s.ListTools()
-	if len(tools) != 6 {
-		t.Fatalf("expected 6 tools, got %d", len(tools))
+	if len(tools) != 7 {
+		t.Fatalf("expected 7 tools, got %d", len(tools))
 	}
 }
 
@@ -90,7 +91,7 @@ func TestHandler_Load(t *testing.T) {
 
 func TestHandler_Search(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
-	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "test", Limit: 10, After: nil, Before: nil}).
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "test", Mode: memory.SearchModeKey, Limit: 10, After: nil, Before: nil}).
 		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
 			{ID: 1, Key: "test", Value: "found"},
 		}}, nil)
@@ -114,7 +115,7 @@ func TestHandler_Search_WithDateRange(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
 	after := parseTimeMCP(t, "2026-01-01T00:00:00Z")
 	before := parseTimeMCP(t, "2026-12-31T23:59:59Z")
-	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "", Limit: 10, After: &after, Before: &before}).
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "", Mode: memory.SearchModeKey, Limit: 10, After: &after, Before: &before}).
 		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
 			{ID: 1, Key: "test", Value: "found"},
 		}}, nil)
@@ -149,6 +150,58 @@ func TestHandler_Search_NoQueryNoDate(t *testing.T) {
 	if !result.IsError {
 		t.Fatal("expected error when no query, after, or before provided")
 	}
+}
+
+func TestHandler_Search_ModeParam(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "arch", Mode: memory.SearchModeContent, Limit: 10, After: nil, Before: nil}).
+		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
+			{ID: 1, Key: "arch", Value: "hexagonal architecture"},
+		}}, nil)
+
+	h := NewHandler(mockSvc)
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]interface{}{
+		"query": "arch",
+		"mode":  "content",
+	}
+
+	result, err := h.handleSearch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleSearch error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.Content[0].(mcp.TextContent).Text)
+	}
+}
+
+func TestHandler_Search_InvalidMode(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	h := NewHandler(mockSvc)
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]interface{}{
+		"query": "test",
+		"mode":  "invalid",
+	}
+
+	result, err := h.handleSearch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleSearch error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for invalid mode")
+	}
+}
+
+// extractText extracts the text content from a CallToolResult.
+func extractText(result *mcp.CallToolResult) string {
+	for _, c := range result.Content {
+		if tc, ok := c.(mcp.TextContent); ok {
+			return tc.Text
+		}
+	}
+	return ""
 }
 
 func parseTimeMCP(t *testing.T, s string) time.Time {
@@ -196,6 +249,61 @@ func TestHandler_Delete(t *testing.T) {
 	}
 	if result.IsError {
 		t.Fatalf("expected success, got error: %s", result.Content[0].(mcp.TextContent).Text)
+	}
+}
+
+func TestHandler_ListKeys(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().ListKeys(mock.Anything, &service.ListKeysRequest{Limit: 50}).
+		Return(&service.ListKeysResponse{Keys: []memory.KeyInfo{
+			{Key: "project-path", Critical: true},
+			{Key: "arch", Critical: false},
+		}}, nil)
+
+	h := NewHandler(mockSvc)
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]interface{}{}
+
+	result, err := h.handleListKeys(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleListKeys error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.Content[0].(mcp.TextContent).Text)
+	}
+	text := extractText(result)
+	if !strings.Contains(text, "project-path") {
+		t.Fatalf("expected 'project-path' in list_keys output, got: %s", text)
+	}
+	if !strings.Contains(text, "true") {
+		t.Fatalf("expected 'true' for critical in list_keys output, got: %s", text)
+	}
+}
+
+func TestHandler_ListKeys_WithLimit(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().ListKeys(mock.Anything, &service.ListKeysRequest{Limit: 10}).
+		Return(&service.ListKeysResponse{Keys: []memory.KeyInfo{
+			{Key: "a", Critical: false},
+			{Key: "b", Critical: false},
+		}}, nil)
+
+	h := NewHandler(mockSvc)
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]interface{}{
+		"limit": float64(10),
+	}
+
+	result, err := h.handleListKeys(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleListKeys error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.Content[0].(mcp.TextContent).Text)
+	}
+	text := extractText(result)
+	if !strings.Contains(text, "a") || !strings.Contains(text, "b") {
+		t.Fatalf("expected both keys in output, got: %s", text)
 	}
 }
 

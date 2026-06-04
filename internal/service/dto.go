@@ -27,6 +27,7 @@ type LoadResponse struct {
 
 type SearchRequest struct {
 	Query  string
+	Mode   memory.SearchMode
 	Limit  int
 	After  *time.Time
 	Before *time.Time
@@ -57,4 +58,11 @@ type EndSessionRequest struct {
 }
 type EndSessionResponse struct {
 	Session *memory.Session
+}
+
+type ListKeysRequest struct {
+	Limit int
+}
+type ListKeysResponse struct {
+	Keys []memory.KeyInfo
 }

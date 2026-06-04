@@ -27,3 +27,10 @@ type MemoryEntry struct {
 	Value     string    `json:"value"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// KeyInfo represents a distinct memory key with its metadata.
+type KeyInfo struct {
+	Key        string    `json:"key"`
+	LastUsedAt time.Time `json:"last_used_at"`
+	Critical   bool      `json:"critical"`
+}

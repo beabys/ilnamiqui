@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/beabys/ilnamiqui/internal/config"
 	"github.com/beabys/ilnamiqui/internal/memory"
@@ -106,6 +107,22 @@ func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, 
 		return nil, fmt.Errorf("write sentinel: %w", err)
 	}
 
+	// Create project-path system entry if not exists.
+	const systemSessionID = "00000000-0000-0000-0000-000000000000"
+	var pathCount int
+	_ = database.SQLDB().QueryRowContext(ctx, "SELECT COUNT(*) FROM memory_entries WHERE key = 'project-path'").Scan(&pathCount)
+	if pathCount == 0 {
+		if _, err := database.SQLDB().ExecContext(ctx,
+			`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
+			systemSessionID, "project-path", cwd, time.Now().UTC().Format(time.RFC3339),
+		); err == nil {
+			// Mark the key as critical
+			_, _ = database.SQLDB().Exec(
+				`UPDATE memory_keys SET critical = 1 WHERE key = 'project-path'`,
+			)
+		}
+	}
+
 	// Re-read project slug
 	s.database = database
 	projectSlug, err := s.config.ProjectSlug()
@@ -164,14 +181,18 @@ func (s *serviceImpl) Load(ctx context.Context, req *LoadRequest) (*LoadResponse
 	return &LoadResponse{Entries: entries}, nil
 }
 
-// Search searches memory entries by key or value.
+// Search searches memory entries by key, content (FTS5), or both.
 func (s *serviceImpl) Search(ctx context.Context, req *SearchRequest) (*SearchResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.ensureDB(); err != nil {
 		return nil, err
 	}
-	entries, err := s.store.SearchEntries(ctx, req.Query, req.Limit, req.After, req.Before)
+	mode := req.Mode
+	if mode == "" {
+		mode = memory.SearchModeKey
+	}
+	entries, err := s.store.SearchEntries(ctx, req.Query, mode, req.Limit, req.After, req.Before)
 	if err != nil {
 		return nil, fmt.Errorf("search entries: %w", err)
 	}
@@ -190,6 +211,20 @@ func (s *serviceImpl) ListSessions(ctx context.Context, req *ListSessionsRequest
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 	return &ListSessionsResponse{Sessions: sessions}, nil
+}
+
+// ListKeys returns all distinct memory keys.
+func (s *serviceImpl) ListKeys(ctx context.Context, req *ListKeysRequest) (*ListKeysResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensureDB(); err != nil {
+		return nil, err
+	}
+	keys, err := s.store.ListKeys(ctx, req.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("list keys: %w", err)
+	}
+	return &ListKeysResponse{Keys: keys}, nil
 }
 
 // Delete deletes a memory entry by ID.
