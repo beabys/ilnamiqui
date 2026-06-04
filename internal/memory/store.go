@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// SearchMode controls which field(s) the search targets.
+type SearchMode string
+
+const (
+	SearchModeKey     SearchMode = "key"     // default — key prefix LIKE (uses idx_memory_key index)
+	SearchModeContent SearchMode = "content" // FTS5 MATCH on value (indexed full-text)
+	SearchModeBoth    SearchMode = "both"    // key prefix LIKE OR FTS5 MATCH
+)
+
 // NewStore creates a new Store backed by the given *sql.DB.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
@@ -59,17 +68,25 @@ func (s *Store) LoadAllEntries(ctx context.Context, limit int) ([]MemoryEntry, e
 	return s.queryEntries(ctx, query)
 }
 
-// SearchEntries searches entries by key, value, and/or date range.
-// queryStr can be empty (date-only search). after/before are optional date filters.
-// If limit > 0, at most limit entries are returned.
-func (s *Store) SearchEntries(ctx context.Context, queryStr string, limit int, after, before *time.Time) ([]MemoryEntry, error) {
+// SearchEntries searches entries by key (default, uses idx_memory_key index),
+// content (FTS5 MATCH), or both. queryStr can be empty (date-only search).
+// after/before are optional date filters. If limit > 0, at most limit entries are returned.
+func (s *Store) SearchEntries(ctx context.Context, queryStr string, mode SearchMode, limit int, after, before *time.Time) ([]MemoryEntry, error) {
 	var conditions []string
 	var args []any
 
 	if queryStr != "" {
-		conditions = append(conditions, "(key LIKE ? OR value LIKE ?)")
-		pattern := "%" + queryStr + "%"
-		args = append(args, pattern, pattern)
+		switch mode {
+		case SearchModeContent:
+			conditions = append(conditions, `id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)`)
+			args = append(args, toFTSQuery(queryStr))
+		case SearchModeBoth:
+			conditions = append(conditions, `(key LIKE ? OR id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?))`)
+			args = append(args, queryStr+"%", toFTSQuery(queryStr))
+		default: // SearchModeKey
+			conditions = append(conditions, "key LIKE ?")
+			args = append(args, queryStr+"%")
+		}
 	}
 
 	if after != nil {
@@ -95,6 +112,17 @@ func (s *Store) SearchEntries(ctx context.Context, queryStr string, limit int, a
 	}
 
 	return s.queryEntries(ctx, query, args...)
+}
+
+// ListKeys returns all distinct keys ordered by critical DESC, last_used_at DESC.
+// If limit > 0, at most limit keys are returned.
+func (s *Store) ListKeys(ctx context.Context, limit int) ([]KeyInfo, error) {
+	query := `SELECT key, last_used_at, critical FROM memory_keys ORDER BY critical DESC, last_used_at DESC`
+	if limit > 0 {
+		query += " LIMIT ?"
+		return s.queryKeyInfo(ctx, query, limit)
+	}
+	return s.queryKeyInfo(ctx, query)
 }
 
 // DeleteEntry deletes a memory entry by its ID.
@@ -145,4 +173,49 @@ func (s *Store) queryEntries(ctx context.Context, query string, args ...any) ([]
 		entries = []MemoryEntry{}
 	}
 	return entries, nil
+}
+
+// queryKeyInfo is a helper to scan rows into KeyInfo slices.
+func (s *Store) queryKeyInfo(ctx context.Context, query string, args ...any) ([]KeyInfo, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query key info: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var keys []KeyInfo
+	for rows.Next() {
+		var k KeyInfo
+		var lastUsedStr string
+		var criticalInt int
+		if err := rows.Scan(&k.Key, &lastUsedStr, &criticalInt); err != nil {
+			return nil, fmt.Errorf("scan key info: %w", err)
+		}
+		k.LastUsedAt, err = time.Parse(time.RFC3339, lastUsedStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse last_used_at %q: %w", lastUsedStr, err)
+		}
+		k.Critical = criticalInt != 0
+		keys = append(keys, k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+	if keys == nil {
+		keys = []KeyInfo{}
+	}
+	return keys, nil
+}
+
+// toFTSQuery converts user query to FTS5 prefix query syntax.
+// Each word gets "*" appended so "arch design" matches tokens "architecture" "design".
+func toFTSQuery(s string) string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return s
+	}
+	for i, w := range words {
+		words[i] = w + "*"
+	}
+	return strings.Join(words, " ")
 }

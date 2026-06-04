@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,7 +100,7 @@ func TestCLI_Load(t *testing.T) {
 
 func TestCLI_Search(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
-	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "test", Limit: 5, After: nil, Before: nil}).
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "test", Mode: memory.SearchModeKey, Limit: 5, After: nil, Before: nil}).
 		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
 			{ID: 1, Key: "test", Value: "found"},
 		}}, nil)
@@ -114,7 +115,7 @@ func TestCLI_Search(t *testing.T) {
 func TestCLI_Search_WithAfter(t *testing.T) {
 	mockSvc := nmocks.NewService(t)
 	after := parseTime(t, "2026-01-01T00:00:00Z")
-	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "test", Limit: 0, After: &after, Before: nil}).
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "test", Mode: memory.SearchModeKey, Limit: 0, After: &after, Before: nil}).
 		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
 			{ID: 1, Key: "test", Value: "found"},
 		}}, nil)
@@ -126,12 +127,115 @@ func TestCLI_Search_WithAfter(t *testing.T) {
 	}
 }
 
+func TestCLI_Search_ModeFlag(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "arch", Mode: memory.SearchModeKey, Limit: 0, After: nil, Before: nil}).
+		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
+			{ID: 1, Key: "architecture", Value: "design pattern"},
+		}}, nil)
+
+	cli := New(mockSvc)
+	err := cli.Run([]string{"search", "--mode", "key", "arch"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCLI_Search_ModeContent(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "hexagonal", Mode: memory.SearchModeContent, Limit: 0, After: nil, Before: nil}).
+		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
+			{ID: 1, Key: "arch", Value: "hexagonal architecture"},
+		}}, nil)
+
+	cli := New(mockSvc)
+	err := cli.Run([]string{"search", "--mode", "content", "hexagonal"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCLI_Search_ModeBoth(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().Search(mock.Anything, &service.SearchRequest{Query: "arch", Mode: memory.SearchModeBoth, Limit: 0, After: nil, Before: nil}).
+		Return(&service.SearchResponse{Entries: []memory.MemoryEntry{
+			{ID: 1, Key: "architecture", Value: "hexagonal architecture"},
+		}}, nil)
+
+	cli := New(mockSvc)
+	err := cli.Run([]string{"search", "--mode", "both", "arch"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCLI_Search_InvalidMode(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	cli := New(mockSvc)
+
+	err := cli.Run([]string{"search", "--mode", "invalid", "test"})
+	if err == nil {
+		t.Fatal("expected error for invalid --mode")
+	}
+}
+
 func parseTime(t *testing.T, s string) time.Time {
 	tm, err := time.Parse(time.RFC3339, s)
 	if err != nil {
 		t.Fatalf("parse time %q: %v", s, err)
 	}
 	return tm
+}
+
+func TestCLI_Keys_FlagParsing(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().ListKeys(mock.Anything, &service.ListKeysRequest{Limit: 5}).
+		Return(&service.ListKeysResponse{Keys: []memory.KeyInfo{
+			{Key: "alpha", Critical: false},
+			{Key: "beta", Critical: true},
+		}}, nil)
+
+	cli := New(mockSvc)
+	err := cli.Run([]string{"keys", "--limit", "5"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCLI_Keys_Pretty(t *testing.T) {
+	mockSvc := nmocks.NewService(t)
+	mockSvc.EXPECT().ListKeys(mock.Anything, &service.ListKeysRequest{Limit: 0}).
+		Return(&service.ListKeysResponse{Keys: []memory.KeyInfo{
+			{Key: "project-path", Critical: true},
+		}}, nil)
+
+	cli := New(mockSvc)
+
+	r, w, _ := os.Pipe()
+	stdout := os.Stdout
+	os.Stdout = w
+
+	err := cli.Run([]string{"keys", "--pretty"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = stdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+
+	output := buf.String()
+	if !strings.Contains(output, "Key") {
+		t.Fatalf("expected header 'Key' in pretty output, got: %s", output)
+	}
+	if !strings.Contains(output, "project-path") {
+		t.Fatalf("expected 'project-path' in pretty output, got: %s", output)
+	}
+	if !strings.Contains(output, "true") {
+		t.Fatalf("expected 'true' for critical in pretty output, got: %s", output)
+	}
 }
 
 func TestCLI_List(t *testing.T) {

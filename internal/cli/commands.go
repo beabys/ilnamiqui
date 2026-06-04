@@ -19,6 +19,7 @@ const (
 	SAVE    = "save"
 	LOAD    = "load"
 	LIST    = "list"
+	KEYS    = "keys"
 	SEARCH  = "search"
 	DELETE  = "delete"
 	SESSION = "session"
@@ -56,6 +57,8 @@ func (c *CLI) Run(args []string) error {
 		return c.cmdLoad(cmdArgs)
 	case LIST:
 		return c.cmdList(cmdArgs)
+	case KEYS:
+		return c.cmdKeys(cmdArgs)
 	case SEARCH:
 		return c.cmdSearch(cmdArgs)
 	case DELETE:
@@ -159,6 +162,26 @@ func (c *CLI) cmdList(args []string) error {
 	return printJSON(resp.Sessions)
 }
 
+// cmdKeys lists distinct memory keys.
+func (c *CLI) cmdKeys(args []string) error {
+	fs := flag.NewFlagSet("keys", flag.ContinueOnError)
+	pretty := fs.Bool("pretty", false, "human-readable output")
+	limit := fs.Int("limit", 0, "maximum number of keys to return (0 = no limit)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	resp, err := c.svc.ListKeys(context.Background(), &service.ListKeysRequest{Limit: *limit})
+	if err != nil {
+		return err
+	}
+
+	if *pretty {
+		return printKeysTable(resp.Keys)
+	}
+	return printJSON(resp.Keys)
+}
+
 // cmdSearch searches memory entries.
 func (c *CLI) cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
@@ -166,11 +189,19 @@ func (c *CLI) cmdSearch(args []string) error {
 	limit := fs.Int("limit", 0, "maximum number of entries to return (0 = no limit)")
 	after := fs.String("after", "", "only entries after this date (RFC3339 or YYYY-MM-DD)")
 	before := fs.String("before", "", "only entries before this date (RFC3339 or YYYY-MM-DD)")
+	mode := fs.String("mode", "key", "search mode: key (default, uses index), content (value FTS5), both (key+content)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	query := strings.Join(fs.Args(), " ")
+
+	switch *mode {
+	case "key", "content", "both":
+		// valid
+	default:
+		return fmt.Errorf("invalid --mode %q: must be key, content, or both", *mode)
+	}
 
 	// Require at least a query, --after, or --before
 	if query == "" && *after == "" && *before == "" {
@@ -195,6 +226,7 @@ func (c *CLI) cmdSearch(args []string) error {
 
 	resp, err := c.svc.Search(context.Background(), &service.SearchRequest{
 		Query:  query,
+		Mode:   memory.SearchMode(*mode),
 		Limit:  *limit,
 		After:  afterTime,
 		Before: beforeTime,
@@ -294,6 +326,8 @@ Commands:
   load [--session] [--limit N]
                         Load memory entries (all or current session)
   list [--limit N]      List recent sessions
+  keys [--limit N] [--pretty]
+                        List distinct memory keys
   search <query> [--after DATE] [--before DATE] [--limit N]
                         Search memory entries by key or value, optionally filtered by date
   delete <id>           Delete a memory entry by ID
@@ -323,6 +357,28 @@ func parseDate(s string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Time{}, fmt.Errorf("expected RFC3339 (2006-01-02T15:04:05Z) or YYYY-MM-DD (2006-01-02), got %q", s)
+}
+
+// printKeysTable writes keys as a human-readable table.
+func printKeysTable(keys []memory.KeyInfo) error {
+	if len(keys) == 0 {
+		fmt.Println("no keys found")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "Key\tCritical\tLast Used"); err != nil {
+		return err
+	}
+	for _, k := range keys {
+		critical := "false"
+		if k.Critical {
+			critical = "true"
+		}
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\n", k.Key, critical, k.LastUsedAt.Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	return w.Flush()
 }
 
 // printJSON writes v as indented JSON to stdout.

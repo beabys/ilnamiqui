@@ -37,6 +37,29 @@ Otherwise skip.
 
 ---
 
+## Before you save — discover existing keys
+
+Call `list_keys` first to see which keys already exist in this project.
+Reuse existing keys so related context stays grouped together:
+
+```
+list_keys(limit=50)
+```
+
+Example response:
+```
+Key             Critical  Last Used
+project-path    true      2026-06-04T10:30:00Z
+architecture    false     2026-06-04T10:30:00Z
+bug             false     2026-06-03T15:20:00Z
+```
+
+`project-path` stores the project's absolute root path. Before opening files
+outside the project directory, verify context hasn't drifted:
+```
+search_memories(query="project-path")
+```
+
 ## During conversation
 
 Save whenever notable context appears:
@@ -59,17 +82,28 @@ Keep values terse (one sentence). Same key appends.
 
 ```bash
 # Via MCP tools (preferred):
-search_memories(query="<query>")                          # search by text
-search_memories(after="2026-01-01T00:00:00Z")              # search by date range
-search_memories(query="<query>", after="2026-01-01T00:00:00Z", before="2026-06-01T00:00:00Z")
+list_keys(limit=50)                                                       # discover existing keys (+ critical flag)
+search_memories(query="<query>")                                          # search keys only (fast, uses index)
+search_memories(query="<query>", mode="content")                          # search content (FTS5 full-text)
+search_memories(query="<query>", mode="both")                             # search both keys and content
+search_memories(after="2026-01-01T00:00:00Z")                              # search by date range
+search_memories(query="<query>", mode="content", after="2026-01-01")       # combined
 list_sessions(limit=5)
 
 # Via CLI (fallback):
+ilnamiqui keys --limit 10 --pretty
 ilnamiqui list --limit 5 --pretty
-ilnamiqui search "<query>" --pretty                          # CLI fallback
-ilnamiqui search --after 2026-01-01 --before 2026-06-01      # date range only
+ilnamiqui search "<query>" --pretty                         # search keys only (default)
+ilnamiqui search "<query>" --mode content --pretty          # search content (FTS5)
+ilnamiqui search --after 2026-01-01 --before 2026-06-01     # date range only
 ilnamiqui load --pretty
 ```
+
+**Search behavior:**
+- **Default** (`mode="key"`): searches **keys** using prefix match — fast, uses B-tree index.
+- **`mode="content"`**: searches **content/value** using FTS5 full-text search (token-aware, supports prefix) — use when key search isn't enough.
+- **`mode="both"`**: searches both keys AND content.
+- **FTS5 tip**: content search is word-based. `search_memories(query="hex", mode="content")` matches entries with words starting with "hex" (hexagonal, hexagon). NOT substring LIKE — `search_memories(query="lago", mode="content")` will NOT match "hexagonal".
 
 ---
 

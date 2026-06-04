@@ -286,6 +286,74 @@ func (_c *Service_Init_Call) RunAndReturn(run func(ctx context.Context, req *ser
 	return _c
 }
 
+// ListKeys provides a mock function for the type Service
+func (_mock *Service) ListKeys(ctx context.Context, req *service.ListKeysRequest) (*service.ListKeysResponse, error) {
+	ret := _mock.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListKeys")
+	}
+
+	var r0 *service.ListKeysResponse
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *service.ListKeysRequest) (*service.ListKeysResponse, error)); ok {
+		return returnFunc(ctx, req)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *service.ListKeysRequest) *service.ListKeysResponse); ok {
+		r0 = returnFunc(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*service.ListKeysResponse)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *service.ListKeysRequest) error); ok {
+		r1 = returnFunc(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Service_ListKeys_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListKeys'
+type Service_ListKeys_Call struct {
+	*mock.Call
+}
+
+// ListKeys is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *service.ListKeysRequest
+func (_e *Service_Expecter) ListKeys(ctx interface{}, req interface{}) *Service_ListKeys_Call {
+	return &Service_ListKeys_Call{Call: _e.mock.On("ListKeys", ctx, req)}
+}
+
+func (_c *Service_ListKeys_Call) Run(run func(ctx context.Context, req *service.ListKeysRequest)) *Service_ListKeys_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *service.ListKeysRequest
+		if args[1] != nil {
+			arg1 = args[1].(*service.ListKeysRequest)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Service_ListKeys_Call) Return(listKeysResponse *service.ListKeysResponse, err error) *Service_ListKeys_Call {
+	_c.Call.Return(listKeysResponse, err)
+	return _c
+}
+
+func (_c *Service_ListKeys_Call) RunAndReturn(run func(ctx context.Context, req *service.ListKeysRequest) (*service.ListKeysResponse, error)) *Service_ListKeys_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListSessions provides a mock function for the type Service
 func (_mock *Service) ListSessions(ctx context.Context, req *service.ListSessionsRequest) (*service.ListSessionsResponse, error) {
 	ret := _mock.Called(ctx, req)

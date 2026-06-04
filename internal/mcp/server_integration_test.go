@@ -13,16 +13,6 @@ import (
 	"github.com/beabys/ilnamiqui/internal/service"
 )
 
-// extractText extracts the text content from a CallToolResult.
-func extractText(result *mcp.CallToolResult) string {
-	for _, c := range result.Content {
-		if tc, ok := c.(mcp.TextContent); ok {
-			return tc.Text
-		}
-	}
-	return ""
-}
-
 // TestIntegrationFullLifecycle tests init → save → load → search → list → delete
 // via the MCP tool handlers with real service.
 func TestIntegrationFullLifecycle(t *testing.T) {
@@ -72,7 +62,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("save failed: %s", extractText(result))
 	}
-	if !strings.Contains(extractText(result), "Entry 1 saved") {
+	if !strings.Contains(extractText(result), "Entry 2 saved") { // project-path=1, architecture=2
 		t.Fatalf("unexpected save output: %s", extractText(result))
 	}
 
@@ -89,7 +79,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("save failed: %s", extractText(result))
 	}
-	if !strings.Contains(extractText(result), "Entry 2 saved") {
+	if !strings.Contains(extractText(result), "Entry 3 saved") {
 		t.Fatalf("unexpected save output: %s", extractText(result))
 	}
 
@@ -124,6 +114,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	searchReq.Params.Arguments = map[string]any{
 		"query": "hexagonal",
 		"limit": 10,
+		"mode":  "both",
 	}
 	result, err = h.handleSearch(ctx, searchReq)
 	if err != nil {
@@ -164,7 +155,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	t.Log("Step 6: delete_memory")
 	deleteReq := mcp.CallToolRequest{}
 	deleteReq.Params.Arguments = map[string]any{
-		"id": 1,
+		"id": 2, // architecture entry (project-path=1, architecture=2, bug=3)
 	}
 	result, err = h.handleDelete(ctx, deleteReq)
 	if err != nil {
@@ -173,7 +164,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("delete failed: %s", extractText(result))
 	}
-	if !strings.Contains(extractText(result), "deleted entry 1") {
+	if !strings.Contains(extractText(result), "deleted entry 2") {
 		t.Fatalf("unexpected delete output: %s", extractText(result))
 	}
 

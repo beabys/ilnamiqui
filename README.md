@@ -170,27 +170,29 @@ sync is opencode-specific (plugin-based).
 | `save <key> <value>` | Save a memory entry for the active session |
 | `load [--session] [--limit N] [--pretty]` | Load memory entries (all or current session) |
 | `list [--limit N] [--pretty]` | List recent sessions |
-| `search <query> [--after DATE] [--before DATE] [--limit N] [--pretty]` | Search memories by key, value, or date range |
+| `keys [--limit N] [--pretty]` | List distinct keys in use (critical first, then by recency) |
+| `search <query> [--mode key\|content\|both] [--after DATE] [--before DATE] [--limit N] [--pretty]` | Search memories by key (default, indexed), content (FTS5), or both |
 | `delete <id>` | Delete a memory entry by ID |
 | `session start` | Start a new session manually |
 | `session end --summary "..."` | End the active session with a summary |
 | `version` | Print CLI version |
 | `help` | Show usage |
 
-Commands `save`, `load`, `list`, and `search` accept `--pretty` for human-readable tables instead of JSON output.
+Commands `save`, `load`, `list`, `keys`, and `search` accept `--pretty` for human-readable tables instead of JSON output.
 
 ---
 
 ## MCP Server (Claude Code)
 
-The MCP server (`ilnamiqui-mcp`) provides 6 tools over stdio:
+The MCP server (`ilnamiqui-mcp`) provides 7 tools over stdio:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `init_memory` | _(none)_ | Initialize the database in `.ilnamiqui/` |
 | `save_memory` | `key` (required), `value` (required) | Save a memory entry |
 | `load_memories` | `limit` (opt, default 50), `session_only` (opt) | Load memory entries |
-| `search_memories` | `query` (opt), `after` (opt, RFC3339), `before` (opt, RFC3339), `limit` (opt, default 10) | Search by key, value, or date range |
+| `search_memories` | `query` (opt), `mode` (opt, key\|content\|both), `after` (opt, RFC3339), `before` (opt, RFC3339), `limit` (opt, default 10) | Search by key (default, indexed), content (FTS5), or both |
+| `list_keys` | `limit` (opt, default 50) | List distinct keys in use (critical first, then recency) |
 | `list_sessions` | `limit` (opt, default 10) | List recent sessions |
 | `delete_memory` | `id` (required) | Delete a memory entry |
 
