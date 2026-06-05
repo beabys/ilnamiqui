@@ -43,12 +43,18 @@ MCP tools are auto-registered — no manual config needed after install.
 
 ## On chat start
 
-**Always call `load_memories` tool** to load past context:
+**Always load previous memories** — they are your session context:
+
 ```
 load_memories(limit=50)
 ```
-If entries exist, summarize: *"Previous session found — loaded context from <date>"*
-Otherwise skip.
+
+If entries exist, the output IS your session context. Treat loaded
+memories as part of the conversation — they contain decisions, bugs,
+architecture, and progress from previous sessions. Summarize to user:
+*"Previous session found — loaded context from <date>"*
+
+If no entries, skip.
 
 ---
 

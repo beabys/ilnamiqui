@@ -43,11 +43,6 @@ const conversationBuffer: BufferEntry[] = []
 let sessionInitialized = false
 let exitSaved = false
 
-// Loaded context from ilnamiqui — injected into first system prompt
-let loadedContext: string | null = null
-// One-shot guard to prevent re-injection on subsequent turns
-let memoryInjected = false
-
 // ---------------------------------------------------------------------------
 // buildSummary — rule-based summary extraction from conversation buffer
 // ---------------------------------------------------------------------------
@@ -117,22 +112,6 @@ function buildSummary(buffer: BufferEntry[]): string {
     `last_turn: ${last.timestamp}`,
     `entry_count: ${buffer.length}`,
   ].join("\n")
-}
-
-// ---------------------------------------------------------------------------
-// systemTransformInject — applies memory context to system prompt.
-// Exported for testing. Uses module-level vars `loadedContext` and
-// `memoryInjected`.
-// ---------------------------------------------------------------------------
-
-export function systemTransformInject(_input: unknown, output: { system?: string }): void {
-  if (memoryInjected || !loadedContext) return
-  memoryInjected = true
-  const prefix = [
-    "In the previous session we were working on " + loadedContext,
-    "",
-  ].join("\n")
-  output.system = (output.system || "") + "\n\n" + prefix
 }
 
 // ---------------------------------------------------------------------------
@@ -215,15 +194,14 @@ const plugin: Plugin = async ({ $ }) => {
   // We start session + load context immediately so memory is available from first turn.
   // The sessionInitialized guard prevents the session.created handler from duplicating.
   if (!sessionInitialized) {
-    sessionInitialized = true
     log("plugin loaded — auto-initializing session")
-    $`${binary} session start --agent opencode`.quiet().nothrow()
-    // Load context and store for injection into first system prompt
-    // Use --pretty for human-readable context
-    const loadResult = await $`${binary} load --limit 10 --pretty`.quiet().nothrow()
-    if (loadResult.exitCode === 0 && loadResult.stdout) {
-      loadedContext = String(loadResult.stdout).trim()
-      log(`loaded context stored (${loadedContext.length} chars)`)
+    const startResult = await $`${binary} session start --agent opencode`.quiet().nothrow()
+    if (startResult.exitCode === 0) {
+      sessionInitialized = true
+      log("session started successfully")
+    } else {
+      log(`session start failed (exit ${startResult.exitCode}) — will rely on session.created fallback`)
+      // sessionInitialized stays false → session.created handler can create session
     }
   }
 
@@ -258,7 +236,6 @@ const plugin: Plugin = async ({ $ }) => {
           sessionInitialized = true
           log("session.created — starting session and loading context")
           await $`${binary} session start --agent opencode`.quiet().nothrow()
-          await $`${binary} load --limit 50`.quiet().nothrow()
           return
         }
 
@@ -302,12 +279,6 @@ const plugin: Plugin = async ({ $ }) => {
       }
     },
 
-    // Inject stored memory context into the first system prompt
-    "experimental.chat.system.transform": async (_input: unknown, output: { system?: string }) => {
-      log("chat.system.transform — checking memory context")
-      systemTransformInject(_input, output)
-    },
-
     // Buffer user messages (no longer detects /exit — handled by session.deleted)
     "chat.message": chatMessageHook,
 
@@ -339,23 +310,12 @@ const plugin: Plugin = async ({ $ }) => {
 
 export const ilnamiquiPlugin = plugin
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, loadedContext, memoryInjected, BufferEntry, resolveBinarySync, resolveBinaryPath }
-
-// Test helpers to set module-level state
-export function setLoadedContext(value: string | null): void {
-  loadedContext = value
-}
-
-export function setMemoryInjected(value: boolean): void {
-  memoryInjected = value
-}
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath }
 
 export function resetTestState(): void {
   conversationBuffer.length = 0
   sessionInitialized = false
   exitSaved = false
-  loadedContext = null
-  memoryInjected = false
 }
 
 export default { id: "ilnamiqui", server: plugin }
