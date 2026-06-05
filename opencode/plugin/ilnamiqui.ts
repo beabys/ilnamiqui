@@ -228,7 +228,6 @@ const plugin: Plugin = async ({ $ }) => {
   return {
     event: async ({ event }: { event: { type: string } }) => {
       try {
-        log(`event: ${event.type}`)
 
         // session.created — start opencode session + load previous context
         if (event.type === "session.created") {
