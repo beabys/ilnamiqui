@@ -51,14 +51,18 @@ Then prompt: *"ilnamiqui initialized. Start saving with `ilnamiqui save <key> <v
 
 ## On chat start
 
-Plugin auto-loads context. If it didn't, or you need a refresh:
+Load previous session memories:
 
 ```bash
 ilnamiqui load --pretty
 ```
 
-If entries exist, summarize: *"Previous session found — loaded context from <date>"*
-Otherwise skip.
+If entries exist, the output IS your session context. Treat loaded
+memories as part of the conversation — they contain decisions, bugs,
+architecture, and progress from previous sessions. Summarize them to the
+user: *"Previous session found — loaded context from <date>"*
+
+If no entries, skip.
 
 ---
 

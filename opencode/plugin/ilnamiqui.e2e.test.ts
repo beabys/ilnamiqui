@@ -174,3 +174,81 @@ describe("resolveBinarySync export (E2E)", () => {
     expect(() => accessSync(binPath as string, constants.X_OK)).not.toThrow()
   })
 })
+
+// ---------------------------------------------------------------------------
+// E2E: Plugin Server Hooks
+//
+// Tests from plan requirements — verify server returns expected hook surface:
+//   1. event handler (for session.created)
+//   2. Graceful handling of non-zero session start exit
+// ---------------------------------------------------------------------------
+
+describe("plugin server hooks (E2E)", () => {
+  // Helper type
+  type PluginModule = {
+    id: string
+    server: (ctx: Record<string, unknown>) => Promise<Record<string, unknown>>
+  }
+  type Mock$ = (parts: TemplateStringsArray, ...args: unknown[]) => {
+    quiet: () => {
+      nothrow: () => Promise<{ exitCode: number; stdout: string; stderr: string }>
+    }
+  }
+
+  const makeMock$ = (exitCode: number): Mock$ =>
+    ((_parts: TemplateStringsArray, ..._args: unknown[]) => ({
+      quiet: () => ({
+        nothrow: () => Promise.resolve({ exitCode, stdout: "", stderr: "" }),
+      }),
+    })) as unknown as Mock$
+
+  // -----------------------------------------------------------------------
+  // Requirement 1: Server returns event handler + system.transform hook
+  // -----------------------------------------------------------------------
+  it("server returns event handler", async () => {
+    const plugin = pluginModule as PluginModule
+    const mock$ = makeMock$(0)
+    const hooks = await plugin.server({ $: mock$ } as any)
+
+    expect(hooks.event).toBeDefined()
+    expect(typeof hooks.event).toBe("function")
+  })
+
+  it("does not return experimental.chat.system.transform hook — removed", async () => {
+    const plugin = pluginModule as PluginModule
+    const mock$ = makeMock$(0)
+    const hooks = await plugin.server({ $: mock$ } as any)
+    const systemTransform = (
+      hooks as Record<string, unknown>
+    )["experimental.chat.system.transform"]
+    expect(systemTransform).toBeUndefined()
+  })
+
+  // -----------------------------------------------------------------------
+  // Requirement 2: Mock $ with non-zero exit — plugin does not crash
+  // -----------------------------------------------------------------------
+  it("does not crash when session start returns non-zero exit", async () => {
+    const plugin = pluginModule as PluginModule
+    const mock$ = makeMock$(1) // non-zero exit
+
+    // Must not throw — plugin should degrade gracefully
+    const hooks = await plugin.server({ $: mock$ } as any)
+
+    expect(typeof hooks.event).toBe("function")
+    // event handler should still be callable
+    expect(() => (hooks.event as Function)({ type: "session.created", data: {} })).not.toThrow()
+  })
+
+  // -----------------------------------------------------------------------
+  // Requirement 3: Mock $ with success — plugin completes init
+  // -----------------------------------------------------------------------
+  it("completes initialization when session start succeeds", async () => {
+    const plugin = pluginModule as PluginModule
+    const mock$ = makeMock$(0) // success exit
+
+    const hooks = await plugin.server({ $: mock$ } as any)
+
+    expect(typeof hooks.event).toBe("function")
+    expect(() => (hooks.event as Function)({ type: "test", data: {} })).not.toThrow()
+  })
+})
