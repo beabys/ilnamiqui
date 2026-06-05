@@ -153,8 +153,13 @@ describe("resolveBinarySync export (E2E)", () => {
     const plugin = pluginModule as { id: string; server: (ctx: Record<string, unknown>) => Promise<Record<string, unknown>>; }
     expect(typeof plugin.server).toBe("function")
 
+    // Provide mock $ so plugin factory's fire-and-forget init doesn't crash
+    const mock$ = ((_parts: TemplateStringsArray, ..._args: unknown[]) => ({
+      quiet: () => ({ nothrow: () => Promise.resolve({ exitCode: 0, stdout: "", stderr: "" }) }),
+    })) as unknown as (parts: TemplateStringsArray, ...args: unknown[]) => { quiet: () => { nothrow: () => Promise<{ exitCode: number; stdout: string; stderr: string }> } }
+
     // Call server with minimal context to get hooks (including event handler)
-    const hooks = await plugin.server({} as any)
+    const hooks = await plugin.server({ $: mock$ } as any)
     expect(typeof hooks.event).toBe("function")
   })
 

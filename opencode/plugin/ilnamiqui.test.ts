@@ -4,9 +4,14 @@ import {
   buildSummary,
   conversationBuffer,
   exitSaved,
+  loadedContext,
+  memoryInjected,
   resolveBinarySync,
   resolveBinaryPath,
   resetTestState,
+  systemTransformInject,
+  setLoadedContext,
+  setMemoryInjected,
 } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
@@ -419,5 +424,89 @@ describe("resolveBinarySync", () => {
 
     const result = resolveBinarySync()
     expect(result).toBe(binPath)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// loadedContext / memoryInjected — module-level memory state
+// ---------------------------------------------------------------------------
+
+describe("memory context vars", () => {
+  it("resetTestState sets loadedContext to null and memoryInjected to false", () => {
+    resetTestState()
+    expect(loadedContext).toBeNull()
+    expect(memoryInjected).toBe(false)
+  })
+
+  it("setLoadedContext and setMemoryInjected modify module state", () => {
+    resetTestState()
+    setLoadedContext("test context")
+    setMemoryInjected(true)
+    // loadedContext is a const binding — can read but not set from outside
+    // Using the setter allows us to control state for downstream tests
+    expect(loadedContext).toBe("test context")
+    expect(memoryInjected).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// systemTransformInject — applies memory context to system prompt
+// ---------------------------------------------------------------------------
+
+describe("systemTransformInject", () => {
+  beforeEach(() => {
+    resetTestState()
+  })
+
+  it("injects context into system prompt when loadedContext is set", () => {
+    setLoadedContext("session: fix auth middleware\nstate: in-progress")
+    const output: { system?: string } = { system: "You are a helpful assistant." }
+    systemTransformInject({}, output)
+    expect(output.system).toContain("In the previous session we were working on")
+    expect(output.system).toContain("fix auth middleware")
+    expect(output.system).toContain("You are a helpful assistant.")
+    // Original system prompt preserved and context appended
+    const idxHeader = (output.system as string).indexOf("In the previous session we were working on")
+    const idxOrig = (output.system as string).indexOf("You are a helpful assistant")
+    expect(idxOrig).toBeLessThan(idxHeader)
+  })
+
+  it("appends context to empty system prompt when no existing system", () => {
+    setLoadedContext("session: test\nstate: completed")
+    const output: { system?: string } = {}
+    systemTransformInject({}, output)
+    expect(output.system).toContain("In the previous session we were working on")
+    expect(output.system).toContain("session: test")
+  })
+
+  it("memoryInjected guard prevents double injection", () => {
+    setLoadedContext("session: first")
+    const output1: { system?: string } = {}
+    systemTransformInject({}, output1)
+    // First call injects
+    expect(output1.system).toContain("In the previous session we were working on")
+    expect(memoryInjected).toBe(true)
+
+    // Second call should be no-op
+    const output2: { system?: string } = {}
+    systemTransformInject({}, output2)
+    expect(output2.system).toBeUndefined()
+  })
+
+  it("does nothing when loadedContext is null", () => {
+    // loadedContext is null after resetTestState
+    const output: { system?: string } = { system: "base prompt" }
+    systemTransformInject({}, output)
+    // Output unchanged
+    expect(output.system).toBe("base prompt")
+    // memoryInjected stays false
+    expect(memoryInjected).toBe(false)
+  })
+
+  it("sets memoryInjected to true after successful injection", () => {
+    setLoadedContext("session: test")
+    expect(memoryInjected).toBe(false)
+    systemTransformInject({}, { system: "prompt" })
+    expect(memoryInjected).toBe(true)
   })
 })

@@ -62,6 +62,23 @@ Otherwise skip.
 
 ---
 
+## Before requesting permissions
+
+Before asking the user for permission to read or write files outside the
+current working directory, check whether the path is actually inside your
+project:
+
+```
+ilnamiqui search "project-path" --pretty
+```
+
+If the target is under the project root, no permission is needed — proceed.
+This prevents unnecessary prompts (e.g., editing a skill file in the repo).
+
+Key `project-path` is critical (never pruned) and auto-created during init.
+
+---
+
 ## Before you save — discover existing keys
 
 Call `keys` first to see which keys already exist in this project.

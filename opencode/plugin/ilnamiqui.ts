@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode-ai/plugin"
+import { type Plugin, tool } from "@opencode-ai/plugin"
 import path from "path"
 import os from "os"
 import fs from "fs"
@@ -42,6 +42,11 @@ const conversationBuffer: BufferEntry[] = []
 // Guard to prevent double-save on repeated session.created/deleted events
 let sessionInitialized = false
 let exitSaved = false
+
+// Loaded context from ilnamiqui — injected into first system prompt
+let loadedContext: string | null = null
+// One-shot guard to prevent re-injection on subsequent turns
+let memoryInjected = false
 
 // ---------------------------------------------------------------------------
 // buildSummary — rule-based summary extraction from conversation buffer
@@ -112,6 +117,22 @@ function buildSummary(buffer: BufferEntry[]): string {
     `last_turn: ${last.timestamp}`,
     `entry_count: ${buffer.length}`,
   ].join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// systemTransformInject — applies memory context to system prompt.
+// Exported for testing. Uses module-level vars `loadedContext` and
+// `memoryInjected`.
+// ---------------------------------------------------------------------------
+
+export function systemTransformInject(_input: unknown, output: { system?: string }): void {
+  if (memoryInjected || !loadedContext) return
+  memoryInjected = true
+  const prefix = [
+    "In the previous session we were working on " + loadedContext,
+    "",
+  ].join("\n")
+  output.system = (output.system || "") + "\n\n" + prefix
 }
 
 // ---------------------------------------------------------------------------
@@ -189,12 +210,30 @@ const plugin: Plugin = async ({ $ }) => {
 
   log(`binary found: ${binary}`)
 
+  // ----- Auto-initialize on plugin load (app startup) -----
+  // opencode does not fire session.created on app open, only on first interaction.
+  // We start session + load context immediately so memory is available from first turn.
+  // The sessionInitialized guard prevents the session.created handler from duplicating.
+  if (!sessionInitialized) {
+    sessionInitialized = true
+    log("plugin loaded — auto-initializing session")
+    $`${binary} session start --agent opencode`.quiet().nothrow()
+    // Load context and store for injection into first system prompt
+    // Use --pretty for human-readable context
+    const loadResult = await $`${binary} load --limit 10 --pretty`.quiet().nothrow()
+    if (loadResult.exitCode === 0 && loadResult.stdout) {
+      loadedContext = String(loadResult.stdout).trim()
+      log(`loaded context stored (${loadedContext.length} chars)`)
+    }
+  }
+
   // ----- Register chat.message hook to buffer user messages -----
   const chatMessageHook = async (_input: unknown, output: { parts: Array<{ type: string; text?: string }> }) => {
     const textPart = output.parts.find(
       (p): p is { type: string; text: string } => p.type === "text" && typeof p.text === "string",
     )
     if (textPart && textPart.text) {
+      log(`chat.message buffered: ${textPart.text.substring(0, 80)}...`)
       const entry: BufferEntry = {
         role: "user",
         text: textPart.text,
@@ -232,10 +271,11 @@ const plugin: Plugin = async ({ $ }) => {
         }
 
         // session.deleted — user typed /exit or session ended
-        if (event.type === "session.deleted") {
+        // server.instance.disposed — fallback: fires when opencode disposes the plugin server
+        if (event.type === "session.deleted" || event.type === "server.instance.disposed") {
           if (exitSaved) return
 
-          log("session.deleted — saving context")
+          log("session.deleted / server.instance.disposed — saving context")
           const summary = buildSummary(conversationBuffer)
           await $`${binary} save --agent opencode "session" ${summary}`.quiet().nothrow()
           await $`${binary} session end --agent opencode --summary ${summary}`.quiet().nothrow()
@@ -262,19 +302,60 @@ const plugin: Plugin = async ({ $ }) => {
       }
     },
 
+    // Inject stored memory context into the first system prompt
+    "experimental.chat.system.transform": async (_input: unknown, output: { system?: string }) => {
+      log("chat.system.transform — checking memory context")
+      systemTransformInject(_input, output)
+    },
+
     // Buffer user messages (no longer detects /exit — handled by session.deleted)
     "chat.message": chatMessageHook,
+
+    // endSession — AI-callable tool to proactively end a session
+    tool: {
+      endSession: tool({
+        description: "Save session context and end the current ilnamiqui session. Call when the conversation task is complete, user says goodbye, or work is done.",
+        args: {
+          summary: tool.schema.string({
+            description: "One-line summary of what was accomplished this session",
+          }),
+        },
+        async execute(args, context) {
+          const now = new Date().toISOString()
+          const summary = [
+            `session: ${args.summary}`,
+            "state: completed",
+            `last_turn: ${now}`,
+          ].join("\n")
+          await $`${binary} save --agent opencode "session" ${summary}`.quiet().nothrow()
+          await $`${binary} session end --agent opencode --summary ${summary}`.quiet().nothrow()
+          exitSaved = true
+          return `Session saved and ended: ${args.summary}`
+        },
+      }),
+    },
   }
 }
 
 export const ilnamiquiPlugin = plugin
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath }
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, loadedContext, memoryInjected, BufferEntry, resolveBinarySync, resolveBinaryPath }
+
+// Test helpers to set module-level state
+export function setLoadedContext(value: string | null): void {
+  loadedContext = value
+}
+
+export function setMemoryInjected(value: boolean): void {
+  memoryInjected = value
+}
 
 export function resetTestState(): void {
   conversationBuffer.length = 0
   sessionInitialized = false
   exitSaved = false
+  loadedContext = null
+  memoryInjected = false
 }
 
 export default { id: "ilnamiqui", server: plugin }
