@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode-ai/plugin"
+import { type Plugin, tool } from "@opencode-ai/plugin"
 import path from "path"
 import os from "os"
 import fs from "fs"
@@ -42,6 +42,11 @@ const conversationBuffer: BufferEntry[] = []
 // Guard to prevent double-save on repeated session.created/deleted events
 let sessionInitialized = false
 let exitSaved = false
+
+// Loaded context from ilnamiqui — injected into first system prompt
+let loadedContext: string | null = null
+// One-shot guard to prevent re-injection on subsequent turns
+let memoryInjected = false
 
 // ---------------------------------------------------------------------------
 // buildSummary — rule-based summary extraction from conversation buffer
@@ -115,6 +120,22 @@ function buildSummary(buffer: BufferEntry[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// systemTransformInject — applies memory context to system prompt.
+// Exported for testing. Uses module-level vars `loadedContext` and
+// `memoryInjected`.
+// ---------------------------------------------------------------------------
+
+export function systemTransformInject(_input: unknown, output: { system?: string }): void {
+  if (memoryInjected || !loadedContext) return
+  memoryInjected = true
+  const prefix = [
+    "In the previous session we were working on " + loadedContext,
+    "",
+  ].join("\n")
+  output.system = (output.system || "") + "\n\n" + prefix
+}
+
+// ---------------------------------------------------------------------------
 // Platform → binary name resolution
 // ---------------------------------------------------------------------------
 
@@ -141,25 +162,34 @@ function resolveBinaryPath(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Binary finder
+// Binary finder — synchronous (no shell)
 // ---------------------------------------------------------------------------
 
-async function findBinary($: any): Promise<string | null> {
-  // 1. PATH lookup first (finds symlink at ~/.local/bin/ilnamiqui)
-  try {
-    const result = await $`command -v ilnamiqui`.quiet()
-    const stdout = String(result.stdout).trim()
-    if (stdout) {
-      return stdout
+/**
+ * Resolve ilnamiqui binary synchronously:
+ *  1. Walk PATH in process.env.PATH (no shell)
+ *  2. Fallback to platform-specific path in plugin dir
+ *  3. Return null if not found
+ */
+function resolveBinarySync(): string | null {
+  // 1. Scan PATH (no shell subprocess)
+  const pathDirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean)
+  for (const dir of pathDirs) {
+    const full = path.join(dir, "ilnamiqui")
+    if (fs.existsSync(full)) {
+      try {
+        fs.accessSync(full, fs.constants.X_OK)
+        return full
+      } catch {
+        /* not executable, continue */
+      }
     }
-  } catch {
-    /* fall through */
   }
 
   // 2. Fallback: platform-specific binary in plugin directory
   const platformPath = resolveBinaryPath()
   try {
-    await $`test -x ${platformPath}`.quiet()
+    fs.accessSync(platformPath, fs.constants.X_OK)
     return platformPath
   } catch {
     return null
@@ -171,16 +201,31 @@ async function findBinary($: any): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 const plugin: Plugin = async ({ $ }) => {
-  const binary = await findBinary($)
+  const binary = resolveBinarySync()
 
   if (!binary) {
-    log(
-      `binary not found (tried PATH and platform-specific path) — plugin disabled`,
-    )
+    log("binary not found (PATH + plugin dir) — plugin disabled")
     return {}
   }
 
   log(`binary found: ${binary}`)
+
+  // ----- Auto-initialize on plugin load (app startup) -----
+  // opencode does not fire session.created on app open, only on first interaction.
+  // We start session + load context immediately so memory is available from first turn.
+  // The sessionInitialized guard prevents the session.created handler from duplicating.
+  if (!sessionInitialized) {
+    sessionInitialized = true
+    log("plugin loaded — auto-initializing session")
+    $`${binary} session start --agent opencode`.quiet().nothrow()
+    // Load context and store for injection into first system prompt
+    // Use --pretty for human-readable context
+    const loadResult = await $`${binary} load --limit 10 --pretty`.quiet().nothrow()
+    if (loadResult.exitCode === 0 && loadResult.stdout) {
+      loadedContext = String(loadResult.stdout).trim()
+      log(`loaded context stored (${loadedContext.length} chars)`)
+    }
+  }
 
   // ----- Register chat.message hook to buffer user messages -----
   const chatMessageHook = async (_input: unknown, output: { parts: Array<{ type: string; text?: string }> }) => {
@@ -188,6 +233,7 @@ const plugin: Plugin = async ({ $ }) => {
       (p): p is { type: string; text: string } => p.type === "text" && typeof p.text === "string",
     )
     if (textPart && textPart.text) {
+      log(`chat.message buffered: ${textPart.text.substring(0, 80)}...`)
       const entry: BufferEntry = {
         role: "user",
         text: textPart.text,
@@ -202,29 +248,22 @@ const plugin: Plugin = async ({ $ }) => {
 
   // ----- Event hooks -----
   return {
-    event: async (input: unknown) => {
+    event: async ({ event }: { event: { type: string } }) => {
       try {
-        // Handle both bare Event and { event: Event } calling conventions
-        const raw = (input as Record<string, unknown>)?.event ?? input
-        const ev = raw as Record<string, unknown>
-        const type = typeof ev?.type === "string" ? ev.type : ""
-        const name = typeof ev?.name === "string" ? ev.name : ""
+        log(`event: ${event.type}`)
 
         // session.created — start opencode session + load previous context
-        // Matches both regular (session.created) and sync (session.created.1) variants
-        const isCreated = type === "session.created" || name.startsWith("session.created")
-        if (isCreated) {
+        if (event.type === "session.created") {
           if (sessionInitialized) return
           sessionInitialized = true
           log("session.created — starting session and loading context")
-          // Start session (closes old opencode sessions) then load context
           await $`${binary} session start --agent opencode`.quiet().nothrow()
           await $`${binary} load --limit 50`.quiet().nothrow()
           return
         }
 
         // session.compacted — save memory entry + reload after compaction
-        if (type === "session.compacted") {
+        if (event.type === "session.compacted") {
           log("session.compacted — saving entry and reloading memories")
           await $`${binary} save --agent opencode "compact" "compaction completed at ${new Date().toISOString()}"`.quiet().nothrow()
           await $`${binary} load --limit 50`.quiet().nothrow()
@@ -232,12 +271,11 @@ const plugin: Plugin = async ({ $ }) => {
         }
 
         // session.deleted — user typed /exit or session ended
-        // Matches both regular (session.deleted) and sync (session.deleted.1) variants
-        const isDeleted = type === "session.deleted" || name.startsWith("session.deleted")
-        if (isDeleted) {
+        // server.instance.disposed — fallback: fires when opencode disposes the plugin server
+        if (event.type === "session.deleted" || event.type === "server.instance.disposed") {
           if (exitSaved) return
 
-          log("session.deleted — saving context")
+          log("session.deleted / server.instance.disposed — saving context")
           const summary = buildSummary(conversationBuffer)
           await $`${binary} save --agent opencode "session" ${summary}`.quiet().nothrow()
           await $`${binary} session end --agent opencode --summary ${summary}`.quiet().nothrow()
@@ -264,19 +302,60 @@ const plugin: Plugin = async ({ $ }) => {
       }
     },
 
+    // Inject stored memory context into the first system prompt
+    "experimental.chat.system.transform": async (_input: unknown, output: { system?: string }) => {
+      log("chat.system.transform — checking memory context")
+      systemTransformInject(_input, output)
+    },
+
     // Buffer user messages (no longer detects /exit — handled by session.deleted)
     "chat.message": chatMessageHook,
+
+    // endSession — AI-callable tool to proactively end a session
+    tool: {
+      endSession: tool({
+        description: "Save session context and end the current ilnamiqui session. Call when the conversation task is complete, user says goodbye, or work is done.",
+        args: {
+          summary: tool.schema.string({
+            description: "One-line summary of what was accomplished this session",
+          }),
+        },
+        async execute(args, context) {
+          const now = new Date().toISOString()
+          const summary = [
+            `session: ${args.summary}`,
+            "state: completed",
+            `last_turn: ${now}`,
+          ].join("\n")
+          await $`${binary} save --agent opencode "session" ${summary}`.quiet().nothrow()
+          await $`${binary} session end --agent opencode --summary ${summary}`.quiet().nothrow()
+          exitSaved = true
+          return `Session saved and ended: ${args.summary}`
+        },
+      }),
+    },
   }
 }
 
 export const ilnamiquiPlugin = plugin
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, findBinary, resolveBinaryPath }
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, loadedContext, memoryInjected, BufferEntry, resolveBinarySync, resolveBinaryPath }
+
+// Test helpers to set module-level state
+export function setLoadedContext(value: string | null): void {
+  loadedContext = value
+}
+
+export function setMemoryInjected(value: boolean): void {
+  memoryInjected = value
+}
 
 export function resetTestState(): void {
   conversationBuffer.length = 0
   sessionInitialized = false
   exitSaved = false
+  loadedContext = null
+  memoryInjected = false
 }
 
 export default { id: "ilnamiqui", server: plugin }

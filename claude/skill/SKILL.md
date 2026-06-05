@@ -69,11 +69,14 @@ architecture    false     2026-06-04T10:30:00Z
 bug             false     2026-06-03T15:20:00Z
 ```
 
-`project-path` stores the project's absolute root path. Before opening files
-outside the project directory, verify context hasn't drifted:
+`project-path` stores the project's absolute root path. Before asking the user
+for permission to access files outside the current directory, check whether
+the path is within the project root:
 ```
-search_memories(query="project-path")
+search_memories(query="project-path", mode="content")
 ```
+If the target is under the project root, no permission is needed — proceed.
+This prevents unnecessary prompts.
 
 ## During conversation
 

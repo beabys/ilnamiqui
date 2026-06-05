@@ -9,6 +9,7 @@ import {
   buildSummary,
   conversationBuffer,
   exitSaved,
+  resolveBinarySync,
   resetTestState,
 } from "./ilnamiqui"
 
@@ -40,6 +41,7 @@ describe("plugin loading", () => {
     expect(Array.isArray(conversationBuffer)).toBe(true)
     expect(typeof exitSaved).toBe("boolean")
     expect(typeof resetTestState).toBe("function")
+    expect(typeof resolveBinarySync).toBe("function")
   })
 })
 

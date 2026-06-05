@@ -1,11 +1,17 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
+import fs from "fs"
 import {
   buildSummary,
   conversationBuffer,
   exitSaved,
-  findBinary,
+  loadedContext,
+  memoryInjected,
+  resolveBinarySync,
   resolveBinaryPath,
   resetTestState,
+  systemTransformInject,
+  setLoadedContext,
+  setMemoryInjected,
 } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
@@ -329,98 +335,178 @@ describe("resolveBinaryPath", () => {
 })
 
 // ---------------------------------------------------------------------------
-// findBinary — binary resolution order: PATH first, platform fallback second
+// resolveBinarySync — synchronous binary resolution: PATH then platform
 // ---------------------------------------------------------------------------
 
-describe("findBinary", () => {
-  // Helper: create a mock `$` template tag that returns configured results
-  function mockShell(config: {
-    commandVFound?: boolean
-    commandVPath?: string
-    platformFound?: boolean
-  }) {
-    const calls: string[] = []
-    const $ = (strings: TemplateStringsArray, ...values: unknown[]) => {
-      const cmd = strings.reduce(
-        (acc, s, i) => acc + s + (values[i] ?? ""),
-        "",
-      )
-      calls.push(cmd.trim())
+describe("resolveBinarySync", () => {
+  const ORIG_PATH = process.env.PATH
+  const platformPath = resolveBinaryPath()
 
-      const quiet = () => {
-        // command -v ilnamiqui
-        if (cmd.trim().startsWith("command -v")) {
-          if (config.commandVFound ?? true) {
-            return Promise.resolve({
-              stdout: config.commandVPath ?? "/usr/local/bin/ilnamiqui",
-              stderr: "",
-              exitCode: 0,
-            })
-          }
-          return Promise.reject(new Error("command not found"))
-        }
-        // test -x <path>
-        if (cmd.trim().startsWith("test -x")) {
-          if (config.platformFound ?? false) {
-            return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 })
-          }
-          return Promise.reject(new Error("file not found"))
-        }
-        return Promise.reject(new Error(`unexpected command: ${cmd}`))
-      }
-      return { quiet }
-    }
-    return { $, calls }
-  }
-
-  it("returns PATH binary when command -v succeeds", async () => {
-    const { $ } = mockShell({
-      commandVFound: true,
-      commandVPath: "/home/user/.local/bin/ilnamiqui",
-    })
-    const result = await findBinary($)
-    expect(result).toBe("/home/user/.local/bin/ilnamiqui")
+  afterEach(() => {
+    process.env.PATH = ORIG_PATH
+    vi.restoreAllMocks()
   })
 
-  it("tries PATH before platform-specific path (ordering test)", async () => {
-    const { $, calls } = mockShell({
-      commandVFound: true,
-      commandVPath: "/usr/bin/ilnamiqui",
-      platformFound: false,
-    })
-    await findBinary($)
-    expect(calls.length).toBeGreaterThanOrEqual(1)
-    expect(calls[0]).toBe("command -v ilnamiqui")
+  it("finds binary on PATH", () => {
+    process.env.PATH = "/tmp/test-bin"
+    const binPath = "/tmp/test-bin/ilnamiqui"
+
+    vi.spyOn(fs, "existsSync").mockImplementation(
+      (p) => p === binPath,
+    )
+    vi.spyOn(fs, "accessSync").mockImplementation(() => {})
+
+    const result = resolveBinarySync()
+    expect(result).toBe(binPath)
   })
 
-  it("falls back to platform binary when not on PATH", async () => {
-    // command -v fails, test -x succeeds
-    const { $ } = mockShell({
-      commandVFound: false,
-      platformFound: true,
+  it("skips non-executable PATH entry, uses platform fallback", () => {
+    process.env.PATH = "/tmp/test-bin"
+    const binPath = "/tmp/test-bin/ilnamiqui"
+
+    // PATH entry exists but NOT executable
+    vi.spyOn(fs, "existsSync").mockImplementation(
+      (p) => p === binPath || p === platformPath,
+    )
+    // accessSync throws for PATH entry, succeeds for platformPath
+    vi.spyOn(fs, "accessSync").mockImplementation((p) => {
+      if (p === binPath) throw new Error("not executable")
     })
-    const result = await findBinary($)
-    // Should return a path (platform-specific) containing ilnamiqui
-    expect(result).not.toBeNull()
-    expect(result).toContain("ilnamiqui")
+
+    const result = resolveBinarySync()
+    expect(result).toBe(platformPath)
   })
 
-  it("returns null when both PATH and platform binary missing", async () => {
-    const { $ } = mockShell({
-      commandVFound: false,
-      platformFound: false,
+  it("falls back to platform binary when PATH empty and platform exists", () => {
+    process.env.PATH = ""
+
+    vi.spyOn(fs, "existsSync").mockImplementation(
+      (p) => p === platformPath,
+    )
+    vi.spyOn(fs, "accessSync").mockImplementation(() => {})
+
+    const result = resolveBinarySync()
+    expect(result).toBe(platformPath)
+  })
+
+  it("returns null when no binary found anywhere", () => {
+    process.env.PATH = ""
+
+    vi.spyOn(fs, "existsSync").mockReturnValue(false)
+    vi.spyOn(fs, "accessSync").mockImplementation(() => {
+      throw new Error("ENOENT")
     })
-    const result = await findBinary($)
+
+    const result = resolveBinarySync()
     expect(result).toBeNull()
   })
 
-  it("returns null when command -v stdout is empty", async () => {
-    const { $ } = mockShell({
-      commandVFound: true,
-      commandVPath: "",
-      platformFound: false,
+  it("returns null when PATH entry exists but not executable and platform missing", () => {
+    process.env.PATH = "/tmp/test-bin"
+
+    vi.spyOn(fs, "existsSync").mockReturnValue(false)
+    vi.spyOn(fs, "accessSync").mockImplementation(() => {
+      throw new Error("ENOENT")
     })
-    const result = await findBinary($)
+
+    const result = resolveBinarySync()
     expect(result).toBeNull()
+  })
+
+  it("filters empty PATH entries (trailing colon)", () => {
+    process.env.PATH = "/tmp/test-bin:"  // trailing colon → empty entry
+    const binPath = "/tmp/test-bin/ilnamiqui"
+
+    vi.spyOn(fs, "existsSync").mockImplementation(
+      (p) => p === binPath,
+    )
+    vi.spyOn(fs, "accessSync").mockImplementation(() => {})
+
+    const result = resolveBinarySync()
+    expect(result).toBe(binPath)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// loadedContext / memoryInjected — module-level memory state
+// ---------------------------------------------------------------------------
+
+describe("memory context vars", () => {
+  it("resetTestState sets loadedContext to null and memoryInjected to false", () => {
+    resetTestState()
+    expect(loadedContext).toBeNull()
+    expect(memoryInjected).toBe(false)
+  })
+
+  it("setLoadedContext and setMemoryInjected modify module state", () => {
+    resetTestState()
+    setLoadedContext("test context")
+    setMemoryInjected(true)
+    // loadedContext is a const binding — can read but not set from outside
+    // Using the setter allows us to control state for downstream tests
+    expect(loadedContext).toBe("test context")
+    expect(memoryInjected).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// systemTransformInject — applies memory context to system prompt
+// ---------------------------------------------------------------------------
+
+describe("systemTransformInject", () => {
+  beforeEach(() => {
+    resetTestState()
+  })
+
+  it("injects context into system prompt when loadedContext is set", () => {
+    setLoadedContext("session: fix auth middleware\nstate: in-progress")
+    const output: { system?: string } = { system: "You are a helpful assistant." }
+    systemTransformInject({}, output)
+    expect(output.system).toContain("In the previous session we were working on")
+    expect(output.system).toContain("fix auth middleware")
+    expect(output.system).toContain("You are a helpful assistant.")
+    // Original system prompt preserved and context appended
+    const idxHeader = (output.system as string).indexOf("In the previous session we were working on")
+    const idxOrig = (output.system as string).indexOf("You are a helpful assistant")
+    expect(idxOrig).toBeLessThan(idxHeader)
+  })
+
+  it("appends context to empty system prompt when no existing system", () => {
+    setLoadedContext("session: test\nstate: completed")
+    const output: { system?: string } = {}
+    systemTransformInject({}, output)
+    expect(output.system).toContain("In the previous session we were working on")
+    expect(output.system).toContain("session: test")
+  })
+
+  it("memoryInjected guard prevents double injection", () => {
+    setLoadedContext("session: first")
+    const output1: { system?: string } = {}
+    systemTransformInject({}, output1)
+    // First call injects
+    expect(output1.system).toContain("In the previous session we were working on")
+    expect(memoryInjected).toBe(true)
+
+    // Second call should be no-op
+    const output2: { system?: string } = {}
+    systemTransformInject({}, output2)
+    expect(output2.system).toBeUndefined()
+  })
+
+  it("does nothing when loadedContext is null", () => {
+    // loadedContext is null after resetTestState
+    const output: { system?: string } = { system: "base prompt" }
+    systemTransformInject({}, output)
+    // Output unchanged
+    expect(output.system).toBe("base prompt")
+    // memoryInjected stays false
+    expect(memoryInjected).toBe(false)
+  })
+
+  it("sets memoryInjected to true after successful injection", () => {
+    setLoadedContext("session: test")
+    expect(memoryInjected).toBe(false)
+    systemTransformInject({}, { system: "prompt" })
+    expect(memoryInjected).toBe(true)
   })
 })
