@@ -32,6 +32,13 @@ import (
 // versions are immutable. Never edit existing versions — only append new ones.
 // Each version must be idempotent (CREATE IF NOT EXISTS).
 
+const version3 = `
+INSERT OR IGNORE INTO memory_entries (session_id, key, value, created_at)
+VALUES ('00000000-0000-0000-0000-000000000000', 'system',
+        'REMINDER: Read the rules in AGENTS.md before continuing with your task(s).',
+        strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+`
+
 const version2 = `
 ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'opencode';
 UPDATE sessions SET agent = '_system' WHERE id = '00000000-0000-0000-0000-000000000000';
@@ -118,6 +125,10 @@ var migrations = []migration{
 		sql:  version2,
 		desc: "add agent column to sessions",
 	},
+	{
+		sql:  version3,
+		desc: "seed system memory key",
+	},
 }
 
 // LatestVersion returns the latest schema version, derived from the number of
@@ -179,16 +190,17 @@ func runPostMigrationV(v int, db *sql.DB) error {
 	switch v {
 	case 1:
 		return runPostMigrationV1(db)
-	case 2:
-		return runPostMigrationV2(db)
+	case 3:
+		return runPostMigrationV3(db)
 	default:
 		return nil
 	}
 }
 
-func runPostMigrationV2(db *sql.DB) error {
-	// No post-tasks for v2 yet. Placeholder for future use.
-	_ = db
+func runPostMigrationV3(db *sql.DB) error {
+	if _, err := db.Exec(`UPDATE memory_keys SET critical = 1 WHERE key = 'system'`); err != nil {
+		return fmt.Errorf("set system key critical: %w", err)
+	}
 	return nil
 }
 

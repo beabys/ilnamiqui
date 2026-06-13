@@ -11,6 +11,7 @@ import {
   exitSaved,
   resolveBinarySync,
   resetTestState,
+  interactionCounter,
 } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,61 @@ describe("exitSaved guard", () => {
     // After session.deleted sets it to true, second call should be noop
     // We can't set it directly (read-only export), but we verify the pattern
     expect(saved1).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// interaction counter combined behavior
+// ---------------------------------------------------------------------------
+
+describe("interaction counter combined behavior", () => {
+  it("uses local counter to model combined user+messages and various tool calls", () => {
+    let count = 0
+
+    // Simulate 3 user messages
+    for (let i = 0; i < 3; i++) {
+      conversationBuffer.push({
+        role: "user",
+        text: `message ${i}`,
+        timestamp: new Date().toISOString(),
+      })
+      count++
+    }
+
+    // Simulate varied tool calls (not just task)
+    count++ // tool call: read
+    count++ // tool call: write
+    count++ // tool call: bash
+    count++ // tool call: task
+
+    expect(count).toBe(7)
+  })
+
+  it("buffer and counter work independently", () => {
+    let count = 0
+
+    // Fill buffer to 20, simulate 25 interactions
+    for (let i = 0; i < 20; i++) {
+      conversationBuffer.push({
+        role: "user",
+        text: `msg ${i}`,
+        timestamp: new Date().toISOString(),
+      })
+      count++
+      if (conversationBuffer.length > 20) conversationBuffer.shift()
+    }
+    // 5 more tool-only interactions (various tools)
+    count += 5
+
+    expect(conversationBuffer.length).toBe(20)
+    expect(count).toBe(25)
+  })
+
+  it("resets with resetTestState()", () => {
+    // interactionCounter is read-only const binding (ES module)
+    // resetTestState runs in module scope where it can mutate
+    resetTestState()
+    expect(interactionCounter).toBe(0)
   })
 })
 

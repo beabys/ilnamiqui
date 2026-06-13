@@ -114,7 +114,7 @@ func (s *serviceImpl) Init(ctx context.Context, _ *InitRequest) (*InitResponse, 
 	if pathCount == 0 {
 		if _, err := database.SQLDB().ExecContext(ctx,
 			`INSERT INTO memory_entries (session_id, key, value, created_at) VALUES (?, ?, ?, ?)`,
-			systemSessionID, "project-path", cwd, time.Now().UTC().Format(time.RFC3339),
+			systemSessionID, "project-path", "Remember, the working directory for this project is: "+cwd, time.Now().UTC().Format(time.RFC3339),
 		); err == nil {
 			// Mark the key as critical
 			_, _ = database.SQLDB().Exec(

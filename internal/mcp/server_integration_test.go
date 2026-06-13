@@ -62,11 +62,11 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("save failed: %s", extractText(result))
 	}
-	if !strings.Contains(extractText(result), "Entry 2 saved") { // project-path=1, architecture=2
+	if !strings.Contains(extractText(result), "Entry 3 saved") { // system=1, project-path=2, architecture=3
 		t.Fatalf("unexpected save output: %s", extractText(result))
 	}
 
-	// Save second entry
+	// Save second entry (bug)
 	saveReq2 := mcp.CallToolRequest{}
 	saveReq2.Params.Arguments = map[string]any{
 		"key":   "bug",
@@ -79,7 +79,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("save failed: %s", extractText(result))
 	}
-	if !strings.Contains(extractText(result), "Entry 3 saved") {
+	if !strings.Contains(extractText(result), "Entry 4 saved") { // system=1, project-path=2, architecture=3, bug=4
 		t.Fatalf("unexpected save output: %s", extractText(result))
 	}
 
@@ -155,7 +155,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	t.Log("Step 6: delete_memory")
 	deleteReq := mcp.CallToolRequest{}
 	deleteReq.Params.Arguments = map[string]any{
-		"id": 2, // architecture entry (project-path=1, architecture=2, bug=3)
+		"id": 3, // architecture entry (system=1, project-path=2, architecture=3, bug=4)
 	}
 	result, err = h.handleDelete(ctx, deleteReq)
 	if err != nil {
@@ -164,7 +164,7 @@ func TestIntegrationFullLifecycle(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("delete failed: %s", extractText(result))
 	}
-	if !strings.Contains(extractText(result), "deleted entry 2") {
+	if !strings.Contains(extractText(result), "deleted entry 3") {
 		t.Fatalf("unexpected delete output: %s", extractText(result))
 	}
 

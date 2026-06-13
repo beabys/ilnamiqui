@@ -39,6 +39,25 @@ interface BufferEntry {
 
 const conversationBuffer: BufferEntry[] = []
 
+// Interaction counter — tracks user messages + subagent task calls
+// Separate from conversationBuffer (which FIFOs user text for summaries)
+const MAX_INTERACTIONS = 50
+let interactionCounter = 0
+
+const REMINDER_TEXT = "REMINDER: Read the rules in AGENTS.md before continuing with your task(s)."
+
+/**
+ * Format critical reminder values for injection into tool output.
+ * Joins multiple values with " and " separator.
+ * Falls back to REMINDER_TEXT when no values provided.
+ */
+function formatReminder(values: string[]): string {
+  if (values.length === 0) {
+    return REMINDER_TEXT
+  }
+  return values.join(" and ")
+}
+
 // Guard to prevent double-save on repeated session.created/deleted events
 let sessionInitialized = false
 let exitSaved = false
@@ -211,7 +230,6 @@ const plugin: Plugin = async ({ $ }) => {
       (p): p is { type: string; text: string } => p.type === "text" && typeof p.text === "string",
     )
     if (textPart && textPart.text) {
-      log(`chat.message buffered: ${textPart.text.substring(0, 80)}...`)
       const entry: BufferEntry = {
         role: "user",
         text: textPart.text,
@@ -221,6 +239,8 @@ const plugin: Plugin = async ({ $ }) => {
       if (conversationBuffer.length > MAX_BUFFER) {
         conversationBuffer.shift()
       }
+      // increase interaction counter for user messages as well
+      interactionCounter++
     }
   }
 
@@ -278,8 +298,53 @@ const plugin: Plugin = async ({ $ }) => {
       }
     },
 
-    // Buffer user messages (no longer detects /exit — handled by session.deleted)
+    // Buffer user messages for summary
     "chat.message": chatMessageHook,
+
+    // Track ALL tool calls for interaction counter + inject reminder at threshold
+    // At threshold, load ALL critical keys from memory (via ilnamiqui binary),
+    // join their values with " and ", and inject into output.
+    // Falls back to REMINDER_TEXT constant if binary calls fail.
+    "tool.execute.after": async (input: { tool: string }, output: { output: string }) => {
+      interactionCounter++
+      if (interactionCounter >= MAX_INTERACTIONS) {
+        interactionCounter = 0
+
+        // Dynamically load critical memory keys from DB
+        let reminderText = REMINDER_TEXT
+        try {
+          // 1. Fetch all keys to find which are critical
+          // NOTE: flags MUST come before value (Go flag package quirk)
+          const keysResult = await $`${binary} keys`.quiet().nothrow()
+          if (keysResult.exitCode === 0 && keysResult.stdout) {
+            const keys = JSON.parse(String(keysResult.stdout)) as Array<{ key: string; critical: boolean; last_used_at: string }>
+            const criticalKeys = keys.filter(k => k.critical === true)
+
+            if (criticalKeys.length > 0) {
+              const values: string[] = []
+              for (const k of criticalKeys) {
+                // Search for entries with this critical key (flag before value)
+                const searchResult = await $`${binary} search --mode key ${k.key}`.quiet().nothrow()
+                if (searchResult.exitCode === 0 && searchResult.stdout) {
+                  const entries = JSON.parse(String(searchResult.stdout)) as Array<{ value: string }>
+                  if (entries.length > 0) {
+                    // Take latest entry value per key (last in array = most recent)
+                    values.push(entries[entries.length - 1].value)
+                  }
+                }
+              }
+              if (values.length > 0) {
+                reminderText = formatReminder(values)
+              }
+            }
+          }
+        } catch (e) {
+          log(`reminder: binary call failed, using fallback: ${e}`)
+        }
+
+        output.output = (output.output || "") + "\n\n---\n" + reminderText
+      }
+    },
 
     // endSession — AI-callable tool to proactively end a session
     tool: {
@@ -309,12 +374,13 @@ const plugin: Plugin = async ({ $ }) => {
 
 export const ilnamiquiPlugin = plugin
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath }
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath, interactionCounter, MAX_INTERACTIONS, REMINDER_TEXT, formatReminder }
 
 export function resetTestState(): void {
   conversationBuffer.length = 0
   sessionInitialized = false
   exitSaved = false
+  interactionCounter = 0
 }
 
 export default { id: "ilnamiqui", server: plugin }

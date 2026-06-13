@@ -71,8 +71,8 @@ func TestService_SaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if len(loadResp.Entries) != 2 {
-		t.Fatalf("expected 2 entries (project-path + test), got %d", len(loadResp.Entries))
+	if len(loadResp.Entries) != 3 {
+		t.Fatalf("expected 3 entries (project-path + system + test), got %d", len(loadResp.Entries))
 	}
 
 	// Search by key (default mode)
@@ -113,8 +113,8 @@ func TestService_SaveAndLoad(t *testing.T) {
 
 	// Verify deleted (project-path entry should remain)
 	loadResp2, _ := svc.Load(context.Background(), &LoadRequest{Limit: 10})
-	if len(loadResp2.Entries) != 1 {
-		t.Fatalf("expected 1 entry (project-path) after test entry delete, got %d", len(loadResp2.Entries))
+	if len(loadResp2.Entries) != 2 {
+		t.Fatalf("expected 2 entries (project-path + system) after test entry delete, got %d", len(loadResp2.Entries))
 	}
 }
 

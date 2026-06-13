@@ -7,6 +7,10 @@ import {
   resolveBinarySync,
   resolveBinaryPath,
   resetTestState,
+  interactionCounter,
+  MAX_INTERACTIONS,
+  REMINDER_TEXT,
+  formatReminder,
 } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
@@ -284,6 +288,161 @@ describe("exitSaved guard", () => {
     // but we can verify the reset function works
     // exitSaved is exported as const (read-only binding) so we verify it's false
     expect(exitSaved).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// interactionCounter & system transform
+// ---------------------------------------------------------------------------
+
+describe("interactionCounter", () => {
+  it("starts at 0 after reset", () => {
+    expect(interactionCounter).toBe(0)
+  })
+
+  it("exists as a number export", () => {
+    // interactionCounter is a read-only const binding (like exitSaved)
+    // mutation happens inside module scope via hooks or resetTestState
+    expect(typeof interactionCounter).toBe("number")
+  })
+
+  it("resets to 0 on resetTestState()", () => {
+    // resetTestState runs inside module scope where interactionCounter is mutable
+    resetTestState()
+    expect(interactionCounter).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// formatReminder — pure function that joins critical values / falls back
+// ---------------------------------------------------------------------------
+
+describe("formatReminder", () => {
+  it("joins multiple values with ' and ' separator", () => {
+    const result = formatReminder(["val1", "val2", "val3"])
+    expect(result).toBe("val1 and val2 and val3")
+  })
+
+  it("returns single value unchanged", () => {
+    const result = formatReminder(["only one"])
+    expect(result).toBe("only one")
+  })
+
+  it("falls back to REMINDER_TEXT when empty array", () => {
+    const result = formatReminder([])
+    expect(result).toBe(REMINDER_TEXT)
+  })
+
+  it("falls back to REMINDER_TEXT for empty input (no binary calls)", () => {
+    // This simulates the fallback behavior when binary calls fail
+    const result = formatReminder([])
+    expect(result).toContain("AGENTS.md")
+    expect(result.startsWith("REMINDER:")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// tool.execute.after — injects reminder directly into output at threshold
+// ---------------------------------------------------------------------------
+
+describe("tool.execute.after (reminder injection)", () => {
+  it("appends reminder to output.output at threshold", () => {
+    let localCounter = MAX_INTERACTIONS
+    let output = "file content here"
+
+    // Simulate the hook logic with formatReminder
+    const criticalValues: string[] = [] // Simulate no critical keys found
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      const reminderText = criticalValues.length > 0 ? formatReminder(criticalValues) : REMINDER_TEXT
+      output = (output || "") + "\n\n---\n" + reminderText
+    }
+
+    expect(output).toContain(REMINDER_TEXT)
+    expect(output).toContain("file content here")
+    expect(localCounter).toBe(0)
+  })
+
+  it("does NOT modify output below threshold", () => {
+    let localCounter = MAX_INTERACTIONS - 2 // 48
+    const originalOutput = "file content here"
+    let output = originalOutput
+
+    localCounter++ // → 49 (< 50)
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+    }
+
+    expect(output).toBe(originalOutput)
+    expect(localCounter).toBe(MAX_INTERACTIONS - 1) // stays at 49
+  })
+
+  it("resets counter after injection", () => {
+    let localCounter = MAX_INTERACTIONS
+    let output = "data"
+
+    const criticalValues = [REMINDER_TEXT]
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      const reminderText = criticalValues.length > 0 ? formatReminder(criticalValues) : REMINDER_TEXT
+      output = (output || "") + "\n\n---\n" + reminderText
+    }
+
+    expect(localCounter).toBe(0)
+    expect(output).toContain(REMINDER_TEXT)
+  })
+
+  it("handles undefined output gracefully", () => {
+    let localCounter = MAX_INTERACTIONS
+    let output: string | undefined = undefined
+
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+    }
+
+    expect(localCounter).toBe(0)
+    expect(output).toBe("\n\n---\n" + REMINDER_TEXT)
+  })
+
+  it("uses formatReminder with critical values from binary call", () => {
+    // Simulate what happens when binary returns critical keys
+    const criticalValues = ["REMINDER: rule1", "REMINDER: rule2"]
+    const joined = formatReminder(criticalValues)
+
+    let localCounter = MAX_INTERACTIONS
+    let output = "data"
+
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + joined
+    }
+
+    expect(output).toBe("data\n\n---\nREMINDER: rule1 and REMINDER: rule2")
+    expect(localCounter).toBe(0)
+  })
+})
+
+
+
+describe("MAX_INTERACTIONS constant", () => {
+  it("is 50", () => {
+    expect(MAX_INTERACTIONS).toBe(50)
+  })
+})
+
+describe("REMINDER_TEXT constant", () => {
+  it("contains AGENTS.md reference", () => {
+    expect(REMINDER_TEXT).toContain("AGENTS.md")
+  })
+
+  it("starts with REMINDER: prefix (system message format)", () => {
+    expect(REMINDER_TEXT.startsWith("REMINDER:")).toBe(true)
   })
 })
 
