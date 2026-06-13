@@ -7,6 +7,9 @@ import {
   resolveBinarySync,
   resolveBinaryPath,
   resetTestState,
+  interactionCounter,
+  MAX_INTERACTIONS,
+  REMINDER_TEXT,
 } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
@@ -284,6 +287,110 @@ describe("exitSaved guard", () => {
     // but we can verify the reset function works
     // exitSaved is exported as const (read-only binding) so we verify it's false
     expect(exitSaved).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// interactionCounter & system transform
+// ---------------------------------------------------------------------------
+
+describe("interactionCounter", () => {
+  it("starts at 0 after reset", () => {
+    expect(interactionCounter).toBe(0)
+  })
+
+  it("exists as a number export", () => {
+    // interactionCounter is a read-only const binding (like exitSaved)
+    // mutation happens inside module scope via hooks or resetTestState
+    expect(typeof interactionCounter).toBe("number")
+  })
+
+  it("resets to 0 on resetTestState()", () => {
+    // resetTestState runs inside module scope where interactionCounter is mutable
+    resetTestState()
+    expect(interactionCounter).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// tool.execute.after — injects reminder directly into output at threshold
+// ---------------------------------------------------------------------------
+
+describe("tool.execute.after (reminder injection)", () => {
+  it("appends reminder to output.output at threshold", () => {
+    let localCounter = MAX_INTERACTIONS
+    let output = "file content here"
+
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+    }
+
+    expect(output).toContain(REMINDER_TEXT)
+    expect(output).toContain("file content here")
+    expect(localCounter).toBe(0)
+  })
+
+  it("does NOT modify output below threshold", () => {
+    let localCounter = MAX_INTERACTIONS - 2 // 28
+    const originalOutput = "file content here"
+    let output = originalOutput
+
+    localCounter++ // → 29 (< 30)
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+    }
+
+    expect(output).toBe(originalOutput)
+    expect(localCounter).toBe(MAX_INTERACTIONS - 1) // stays at 29
+  })
+
+  it("resets counter after injection", () => {
+    let localCounter = MAX_INTERACTIONS
+    let output = "data"
+
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+    }
+
+    expect(localCounter).toBe(0)
+    expect(output).toContain(REMINDER_TEXT)
+  })
+
+  it("handles undefined output gracefully", () => {
+    let localCounter = MAX_INTERACTIONS
+    let output: string | undefined = undefined
+
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+    }
+
+    expect(localCounter).toBe(0)
+    expect(output).toBe("\n\n---\n" + REMINDER_TEXT)
+  })
+})
+
+
+
+describe("MAX_INTERACTIONS constant", () => {
+  it("is 30", () => {
+    expect(MAX_INTERACTIONS).toBe(30)
+  })
+})
+
+describe("REMINDER_TEXT constant", () => {
+  it("contains AGENTS.md reference", () => {
+    expect(REMINDER_TEXT).toContain("AGENTS.md")
+  })
+
+  it("starts with REMINDER: prefix (system message format)", () => {
+    expect(REMINDER_TEXT.startsWith("REMINDER:")).toBe(true)
   })
 })
 

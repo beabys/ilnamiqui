@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach } from "vitest"
 import { execSync } from "child_process"
 import { existsSync, accessSync, constants } from "fs"
 import { homedir } from "os"
 import { join } from "path"
 import pluginModule from "./ilnamiqui"
-import { resolveBinarySync } from "./ilnamiqui"
+import { resolveBinarySync, REMINDER_TEXT, resetTestState } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
 // E2E: Plugin Binary Resolution
@@ -184,6 +184,10 @@ describe("resolveBinarySync export (E2E)", () => {
 // ---------------------------------------------------------------------------
 
 describe("plugin server hooks (E2E)", () => {
+  beforeEach(() => {
+    resetTestState()
+  })
+
   // Helper type
   type PluginModule = {
     id: string
@@ -203,7 +207,7 @@ describe("plugin server hooks (E2E)", () => {
     })) as unknown as Mock$
 
   // -----------------------------------------------------------------------
-  // Requirement 1: Server returns event handler + system.transform hook
+  // Requirement 1: Server returns event handler + tool.execute.after hook
   // -----------------------------------------------------------------------
   it("server returns event handler", async () => {
     const plugin = pluginModule as PluginModule
@@ -214,14 +218,12 @@ describe("plugin server hooks (E2E)", () => {
     expect(typeof hooks.event).toBe("function")
   })
 
-  it("does not return experimental.chat.system.transform hook — removed", async () => {
+  it("returns tool.execute.after hook", async () => {
     const plugin = pluginModule as PluginModule
     const mock$ = makeMock$(0)
-    const hooks = await plugin.server({ $: mock$ } as any)
-    const systemTransform = (
-      hooks as Record<string, unknown>
-    )["experimental.chat.system.transform"]
-    expect(systemTransform).toBeUndefined()
+    const hooks = await plugin.server({ $: mock$ } as any) as Record<string, unknown>
+    expect(hooks["tool.execute.after"]).toBeDefined()
+    expect(typeof hooks["tool.execute.after"]).toBe("function")
   })
 
   // -----------------------------------------------------------------------
@@ -250,5 +252,62 @@ describe("plugin server hooks (E2E)", () => {
 
     expect(typeof hooks.event).toBe("function")
     expect(() => (hooks.event as Function)({ type: "test", data: {} })).not.toThrow()
+  })
+
+  it("returns tool.execute.after hook", async () => {
+    const plugin = pluginModule as PluginModule
+    const mock$ = makeMock$(0)
+    const hooks = await plugin.server({ $: mock$ } as any) as Record<string, unknown>
+
+    expect(hooks["tool.execute.after"]).toBeDefined()
+    expect(typeof hooks["tool.execute.after"]).toBe("function")
+  })
+
+  // -----------------------------------------------------------------------
+  // Requirement (plan): Plugin exports interaction counter module variables
+  // -----------------------------------------------------------------------
+  it("exports interaction counter module variables", async () => {
+    const mod = await import("./ilnamiqui")
+    expect(typeof mod.interactionCounter).toBe("number")
+    expect(mod.MAX_INTERACTIONS).toBe(30)
+    expect(mod.REMINDER_TEXT).toContain("AGENTS.md")
+  })
+
+  // -----------------------------------------------------------------------
+  // Requirement: tool.execute.after appends reminder to output at threshold
+  // -----------------------------------------------------------------------
+  it("tool.execute.after appends reminder to output at threshold", async () => {
+    const plugin = pluginModule as PluginModule
+    const mock$ = makeMock$(0)
+    const hooks = await plugin.server({ $: mock$ } as any) as Record<string, unknown>
+    const toolAfter = hooks["tool.execute.after"] as (input: { tool: string }, output: { output: string }) => Promise<void>
+
+    const tracked = { output: "tool data" }
+    // Counter starts at 0, need 30 calls to reach threshold
+    for (let i = 0; i < 29; i++) {
+      await toolAfter({ tool: "read" }, { output: "" })
+    }
+    // 30th call — should append reminder
+    await toolAfter({ tool: "read" }, tracked)
+
+    expect(tracked.output).toContain(REMINDER_TEXT)
+    expect(tracked.output).toContain("tool data")
+    expect(tracked.output).toContain("---")
+  })
+
+  // -----------------------------------------------------------------------
+  // Requirement: tool.execute.after does NOT modify output below threshold
+  // -----------------------------------------------------------------------
+  it("tool.execute.after does NOT modify output below threshold", async () => {
+    resetTestState()
+    const plugin = pluginModule as PluginModule
+    const mock$ = makeMock$(0)
+    const hooks = await plugin.server({ $: mock$ } as any) as Record<string, unknown>
+    const toolAfter = hooks["tool.execute.after"] as (input: { tool: string }, output: { output: string }) => Promise<void>
+
+    const tracked = { output: "data" }
+    await toolAfter({ tool: "read" }, tracked) // 1st call, counter=1 (<30)
+
+    expect(tracked.output).toBe("data")
   })
 })

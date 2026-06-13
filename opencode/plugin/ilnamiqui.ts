@@ -39,6 +39,13 @@ interface BufferEntry {
 
 const conversationBuffer: BufferEntry[] = []
 
+// Interaction counter — tracks user messages + subagent task calls
+// Separate from conversationBuffer (which FIFOs user text for summaries)
+const MAX_INTERACTIONS = 50
+let interactionCounter = 0
+
+const REMINDER_TEXT = "REMINDER: Read the rules in AGENTS.md before continuing with your task(s)."
+
 // Guard to prevent double-save on repeated session.created/deleted events
 let sessionInitialized = false
 let exitSaved = false
@@ -211,7 +218,6 @@ const plugin: Plugin = async ({ $ }) => {
       (p): p is { type: string; text: string } => p.type === "text" && typeof p.text === "string",
     )
     if (textPart && textPart.text) {
-      log(`chat.message buffered: ${textPart.text.substring(0, 80)}...`)
       const entry: BufferEntry = {
         role: "user",
         text: textPart.text,
@@ -221,6 +227,8 @@ const plugin: Plugin = async ({ $ }) => {
       if (conversationBuffer.length > MAX_BUFFER) {
         conversationBuffer.shift()
       }
+      // increase interaction counter for user messages as well
+      interactionCounter++
     }
   }
 
@@ -278,8 +286,17 @@ const plugin: Plugin = async ({ $ }) => {
       }
     },
 
-    // Buffer user messages (no longer detects /exit — handled by session.deleted)
+    // Buffer user messages for summary
     "chat.message": chatMessageHook,
+
+    // Track ALL tool calls for interaction counter + inject reminder at threshold
+    "tool.execute.after": async (input: { tool: string }, output: { output: string }) => {
+      interactionCounter++
+      if (interactionCounter >= MAX_INTERACTIONS) {
+        interactionCounter = 0
+        output.output = (output.output || "") + "\n\n---\n" + REMINDER_TEXT
+      }
+    },
 
     // endSession — AI-callable tool to proactively end a session
     tool: {
@@ -309,12 +326,13 @@ const plugin: Plugin = async ({ $ }) => {
 
 export const ilnamiquiPlugin = plugin
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath }
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath, interactionCounter, MAX_INTERACTIONS, REMINDER_TEXT }
 
 export function resetTestState(): void {
   conversationBuffer.length = 0
   sessionInitialized = false
   exitSaved = false
+  interactionCounter = 0
 }
 
 export default { id: "ilnamiqui", server: plugin }
