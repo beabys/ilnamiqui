@@ -10,6 +10,7 @@ import {
   interactionCounter,
   MAX_INTERACTIONS,
   REMINDER_TEXT,
+  formatReminder,
 } from "./ilnamiqui"
 
 // ---------------------------------------------------------------------------
@@ -313,6 +314,34 @@ describe("interactionCounter", () => {
 })
 
 // ---------------------------------------------------------------------------
+// formatReminder — pure function that joins critical values / falls back
+// ---------------------------------------------------------------------------
+
+describe("formatReminder", () => {
+  it("joins multiple values with ' and ' separator", () => {
+    const result = formatReminder(["val1", "val2", "val3"])
+    expect(result).toBe("val1 and val2 and val3")
+  })
+
+  it("returns single value unchanged", () => {
+    const result = formatReminder(["only one"])
+    expect(result).toBe("only one")
+  })
+
+  it("falls back to REMINDER_TEXT when empty array", () => {
+    const result = formatReminder([])
+    expect(result).toBe(REMINDER_TEXT)
+  })
+
+  it("falls back to REMINDER_TEXT for empty input (no binary calls)", () => {
+    // This simulates the fallback behavior when binary calls fail
+    const result = formatReminder([])
+    expect(result).toContain("AGENTS.md")
+    expect(result.startsWith("REMINDER:")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // tool.execute.after — injects reminder directly into output at threshold
 // ---------------------------------------------------------------------------
 
@@ -321,10 +350,13 @@ describe("tool.execute.after (reminder injection)", () => {
     let localCounter = MAX_INTERACTIONS
     let output = "file content here"
 
+    // Simulate the hook logic with formatReminder
+    const criticalValues: string[] = [] // Simulate no critical keys found
     localCounter++
     if (localCounter >= MAX_INTERACTIONS) {
       localCounter = 0
-      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+      const reminderText = criticalValues.length > 0 ? formatReminder(criticalValues) : REMINDER_TEXT
+      output = (output || "") + "\n\n---\n" + reminderText
     }
 
     expect(output).toContain(REMINDER_TEXT)
@@ -333,28 +365,30 @@ describe("tool.execute.after (reminder injection)", () => {
   })
 
   it("does NOT modify output below threshold", () => {
-    let localCounter = MAX_INTERACTIONS - 2 // 28
+    let localCounter = MAX_INTERACTIONS - 2 // 48
     const originalOutput = "file content here"
     let output = originalOutput
 
-    localCounter++ // → 29 (< 30)
+    localCounter++ // → 49 (< 50)
     if (localCounter >= MAX_INTERACTIONS) {
       localCounter = 0
       output = (output || "") + "\n\n---\n" + REMINDER_TEXT
     }
 
     expect(output).toBe(originalOutput)
-    expect(localCounter).toBe(MAX_INTERACTIONS - 1) // stays at 29
+    expect(localCounter).toBe(MAX_INTERACTIONS - 1) // stays at 49
   })
 
   it("resets counter after injection", () => {
     let localCounter = MAX_INTERACTIONS
     let output = "data"
 
+    const criticalValues = [REMINDER_TEXT]
     localCounter++
     if (localCounter >= MAX_INTERACTIONS) {
       localCounter = 0
-      output = (output || "") + "\n\n---\n" + REMINDER_TEXT
+      const reminderText = criticalValues.length > 0 ? formatReminder(criticalValues) : REMINDER_TEXT
+      output = (output || "") + "\n\n---\n" + reminderText
     }
 
     expect(localCounter).toBe(0)
@@ -374,13 +408,31 @@ describe("tool.execute.after (reminder injection)", () => {
     expect(localCounter).toBe(0)
     expect(output).toBe("\n\n---\n" + REMINDER_TEXT)
   })
+
+  it("uses formatReminder with critical values from binary call", () => {
+    // Simulate what happens when binary returns critical keys
+    const criticalValues = ["REMINDER: rule1", "REMINDER: rule2"]
+    const joined = formatReminder(criticalValues)
+
+    let localCounter = MAX_INTERACTIONS
+    let output = "data"
+
+    localCounter++
+    if (localCounter >= MAX_INTERACTIONS) {
+      localCounter = 0
+      output = (output || "") + "\n\n---\n" + joined
+    }
+
+    expect(output).toBe("data\n\n---\nREMINDER: rule1 and REMINDER: rule2")
+    expect(localCounter).toBe(0)
+  })
 })
 
 
 
 describe("MAX_INTERACTIONS constant", () => {
-  it("is 30", () => {
-    expect(MAX_INTERACTIONS).toBe(30)
+  it("is 50", () => {
+    expect(MAX_INTERACTIONS).toBe(50)
   })
 })
 

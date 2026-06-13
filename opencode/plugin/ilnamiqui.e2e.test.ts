@@ -269,7 +269,7 @@ describe("plugin server hooks (E2E)", () => {
   it("exports interaction counter module variables", async () => {
     const mod = await import("./ilnamiqui")
     expect(typeof mod.interactionCounter).toBe("number")
-    expect(mod.MAX_INTERACTIONS).toBe(30)
+    expect(mod.MAX_INTERACTIONS).toBe(50)
     expect(mod.REMINDER_TEXT).toContain("AGENTS.md")
   })
 
@@ -283,11 +283,11 @@ describe("plugin server hooks (E2E)", () => {
     const toolAfter = hooks["tool.execute.after"] as (input: { tool: string }, output: { output: string }) => Promise<void>
 
     const tracked = { output: "tool data" }
-    // Counter starts at 0, need 30 calls to reach threshold
-    for (let i = 0; i < 29; i++) {
+    // Counter starts at 0, need 50 calls to reach threshold
+    for (let i = 0; i < 49; i++) {
       await toolAfter({ tool: "read" }, { output: "" })
     }
-    // 30th call — should append reminder
+    // 50th call — should append reminder
     await toolAfter({ tool: "read" }, tracked)
 
     expect(tracked.output).toContain(REMINDER_TEXT)

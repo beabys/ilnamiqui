@@ -46,6 +46,18 @@ let interactionCounter = 0
 
 const REMINDER_TEXT = "REMINDER: Read the rules in AGENTS.md before continuing with your task(s)."
 
+/**
+ * Format critical reminder values for injection into tool output.
+ * Joins multiple values with " and " separator.
+ * Falls back to REMINDER_TEXT when no values provided.
+ */
+function formatReminder(values: string[]): string {
+  if (values.length === 0) {
+    return REMINDER_TEXT
+  }
+  return values.join(" and ")
+}
+
 // Guard to prevent double-save on repeated session.created/deleted events
 let sessionInitialized = false
 let exitSaved = false
@@ -290,11 +302,47 @@ const plugin: Plugin = async ({ $ }) => {
     "chat.message": chatMessageHook,
 
     // Track ALL tool calls for interaction counter + inject reminder at threshold
+    // At threshold, load ALL critical keys from memory (via ilnamiqui binary),
+    // join their values with " and ", and inject into output.
+    // Falls back to REMINDER_TEXT constant if binary calls fail.
     "tool.execute.after": async (input: { tool: string }, output: { output: string }) => {
       interactionCounter++
       if (interactionCounter >= MAX_INTERACTIONS) {
         interactionCounter = 0
-        output.output = (output.output || "") + "\n\n---\n" + REMINDER_TEXT
+
+        // Dynamically load critical memory keys from DB
+        let reminderText = REMINDER_TEXT
+        try {
+          // 1. Fetch all keys to find which are critical
+          // NOTE: flags MUST come before value (Go flag package quirk)
+          const keysResult = await $`${binary} keys`.quiet().nothrow()
+          if (keysResult.exitCode === 0 && keysResult.stdout) {
+            const keys = JSON.parse(String(keysResult.stdout)) as Array<{ key: string; critical: boolean; last_used_at: string }>
+            const criticalKeys = keys.filter(k => k.critical === true)
+
+            if (criticalKeys.length > 0) {
+              const values: string[] = []
+              for (const k of criticalKeys) {
+                // Search for entries with this critical key (flag before value)
+                const searchResult = await $`${binary} search --mode key ${k.key}`.quiet().nothrow()
+                if (searchResult.exitCode === 0 && searchResult.stdout) {
+                  const entries = JSON.parse(String(searchResult.stdout)) as Array<{ value: string }>
+                  if (entries.length > 0) {
+                    // Take latest entry value per key (last in array = most recent)
+                    values.push(entries[entries.length - 1].value)
+                  }
+                }
+              }
+              if (values.length > 0) {
+                reminderText = formatReminder(values)
+              }
+            }
+          }
+        } catch (e) {
+          log(`reminder: binary call failed, using fallback: ${e}`)
+        }
+
+        output.output = (output.output || "") + "\n\n---\n" + reminderText
       }
     },
 
@@ -326,7 +374,7 @@ const plugin: Plugin = async ({ $ }) => {
 
 export const ilnamiquiPlugin = plugin
 
-export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath, interactionCounter, MAX_INTERACTIONS, REMINDER_TEXT }
+export { buildSummary, conversationBuffer, sessionInitialized, exitSaved, BufferEntry, resolveBinarySync, resolveBinaryPath, interactionCounter, MAX_INTERACTIONS, REMINDER_TEXT, formatReminder }
 
 export function resetTestState(): void {
   conversationBuffer.length = 0

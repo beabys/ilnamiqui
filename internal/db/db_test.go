@@ -172,6 +172,73 @@ func TestRunMigrations_InvalidConn(t *testing.T) {
 	}
 }
 
+func TestRunMigrations_V3CreatesSystemEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3_system.db")
+	d, err := NewDB(path)
+	if err != nil {
+		t.Fatalf("NewDB error: %v", err)
+	}
+	defer d.Close()
+
+	// Run all migrations (v1, v2, v3)
+	if err := RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("RunMigrations error: %v", err)
+	}
+
+	// Verify the system memory entry exists
+	var value string
+	err = d.SQLDB().QueryRow(
+		`SELECT value FROM memory_entries WHERE key = 'system' AND session_id = '00000000-0000-0000-0000-000000000000'`,
+	).Scan(&value)
+	if err != nil {
+		t.Fatalf("query system memory entry: %v", err)
+	}
+	expected := "REMINDER: Read the rules in AGENTS.md before continuing with your task(s)."
+	if value != expected {
+		t.Fatalf("expected value %q, got %q", expected, value)
+	}
+
+	// Verify the system key is marked critical
+	var critical int
+	err = d.SQLDB().QueryRow(
+		`SELECT critical FROM memory_keys WHERE key = 'system'`,
+	).Scan(&critical)
+	if err != nil {
+		t.Fatalf("query system key critical flag: %v", err)
+	}
+	if critical != 1 {
+		t.Fatalf("expected critical=1 for system key, got %d", critical)
+	}
+
+	// Idempotency: running migrations again should not error or duplicate
+	if err := RunMigrations(d.SQLDB()); err != nil {
+		t.Fatalf("second RunMigrations should succeed: %v", err)
+	}
+
+	// Still exactly one system entry
+	var count int
+	err = d.SQLDB().QueryRow(
+		`SELECT COUNT(*) FROM memory_entries WHERE key = 'system'`,
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("count system entries: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 system entry after idempotent migration, got %d", count)
+	}
+
+	// Critical still 1 after idempotent run
+	err = d.SQLDB().QueryRow(
+		`SELECT critical FROM memory_keys WHERE key = 'system'`,
+	).Scan(&critical)
+	if err != nil {
+		t.Fatalf("query system key critical flag after idempotent: %v", err)
+	}
+	if critical != 1 {
+		t.Fatalf("expected critical=1 after idempotent run, got %d", critical)
+	}
+}
+
 func TestRunMigrations_Versioning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "version.db")
 	d, err := NewDB(path)
