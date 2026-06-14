@@ -242,6 +242,44 @@ with open(file, 'w') as f:
   fi
 }
 
+# ─── Ensure ~/.local/bin is in PATH ──────────────────────────────────────────
+ensure_path() {
+  local dir="${HOME}/.local/bin"
+  if echo "$PATH" | grep -q "${dir}"; then
+    info "${dir} already in PATH"
+    return 0
+  fi
+
+  local rc_file=""
+  case "${SHELL:-}" in
+    */bash) rc_file="${HOME}/.bashrc" ;;
+    */zsh)  rc_file="${HOME}/.zshrc" ;;
+    */fish)
+      info "Add 'fish_add_path ${dir}' to your fish config manually"
+      return 0
+      ;;
+    *)
+      info "Add 'export PATH=\"${dir}:\$PATH\"' to your shell config manually"
+      return 0
+      ;;
+  esac
+
+  local line="export PATH=\"\${HOME}/.local/bin:\$PATH\""
+  if [ ! -f "$rc_file" ]; then
+    echo "$line" > "$rc_file"
+    info "Created ${rc_file} with PATH entry"
+  elif ! grep -qF ".local/bin" "$rc_file" 2>/dev/null; then
+    echo "" >> "$rc_file"
+    echo "$line" >> "$rc_file"
+    info "Added ${dir} to PATH in ${rc_file}"
+  else
+    info "${dir} already configured in ${rc_file}"
+    return 0
+  fi
+
+  info "Run 'source ${rc_file}' or open a new terminal to use ilnamiqui"
+}
+
 # ─── Main ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "  ilnamiqui installer"
@@ -349,6 +387,7 @@ if entry not in data['plugin']: data['plugin'].append(entry)"
       else
         info "Symlink already exists: ${SYMLINK_PATH}"
       fi
+      ensure_path
     fi
     ;;
 
@@ -447,6 +486,7 @@ with open(file, 'w') as f:
       else
         info "Symlink already exists: ${SYMLINK_PATH}"
       fi
+      ensure_path
     fi
 
     # 7. Register hooks in settings.json
@@ -559,6 +599,15 @@ elif [ "$TARGET" = "claude" ]; then
   echo "  Skill: installed"
   echo "  Restart Claude Code to activate."
 fi
+
+# Warn if ~/.local/bin not in PATH
+if ! echo "$PATH" | grep -q "${HOME}/.local/bin"; then
+  echo ""
+  info "To use ilnamiqui from any terminal, add ~/.local/bin to your PATH:"
+  info "  source ~/.bashrc   # (or ~/.zshrc — whichever was configured)"
+  info "  or open a new terminal"
+fi
+
 echo ""
 
 exit 0
