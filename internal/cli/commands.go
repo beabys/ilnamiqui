@@ -248,7 +248,7 @@ func (c *CLI) cmdSearch(args []string) error {
 
 	// Require at least a query, --after, or --before
 	if query == "" && *after == "" && *before == "" {
-		return fmt.Errorf("usage: ilnamiqui search <query> [--after DATE] [--before DATE] [--limit N]")
+		return fmt.Errorf("usage: ilnamiqui search [--pretty] [--mode key|content|both] [--limit N] [--after DATE] [--before DATE] <query>")
 	}
 
 	var afterTime, beforeTime *time.Time

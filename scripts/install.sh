@@ -230,7 +230,7 @@ ${value}
 with open(file, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')
-" 2>/dev/null || {
+" || {
       error "python3 script failed to update ${file}"
       return 1
     }
@@ -332,14 +332,11 @@ case "$TARGET" in
 
     PLUGIN_ENTRY="./plugins/ilnamiqui.ts"
     update_json "$OPENCODE_CONFIG" \
-      ".plugin |= (. // [])" \
-      "data.setdefault('plugin', []); entry = '${PLUGIN_ENTRY}'; if entry not in data['plugin']: data['plugin'].append(entry)"
-    # jq version uses a safer approach above; fallback handled in update_json
-    if command -v jq &>/dev/null; then
-      update_json "$OPENCODE_CONFIG" \
-        "if (.plugin // false) then if (.plugin | index(\"${PLUGIN_ENTRY}\")) then . else .plugin += [\"${PLUGIN_ENTRY}\"] end else .plugin = [\"${PLUGIN_ENTRY}\"] end" \
-        ""
-    fi
+      ".plugin |= ((if type == \"string\" then [.] else . // [] end) + [\"./plugins/ilnamiqui.ts\"] | unique)" \
+      "if isinstance(data.get('plugin'), str): data['plugin'] = [data['plugin']]
+data.setdefault('plugin', [])
+entry = '${PLUGIN_ENTRY}'
+if entry not in data['plugin']: data['plugin'].append(entry)"
 
     # 6. Create CLI symlink (opencode only)
     if [ "$DRY_RUN" = true ]; then
@@ -412,7 +409,7 @@ data['mcpServers']['ilnamiqui'] = {
 with open(file, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')
-" 2>/dev/null || {
+" || {
         error "python3 script failed to update ${CLAUDE_CONFIG}"
         exit 1
       }
@@ -502,7 +499,7 @@ data['hooks']['SessionEnd'] = [{'hooks': [{'type': 'command', 'command': '${SESS
 with open(file, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')
-" 2>/dev/null || {
+" || {
           error "python3 script failed to update ${CLAUDE_SETTINGS}"
           exit 1
         }
