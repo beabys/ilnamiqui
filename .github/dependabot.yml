@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Configuration for Go dependencies
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    assignees:
+      - "beabys"
