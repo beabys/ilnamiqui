@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/mark3labs/mcp-go v0.58.0
+	github.com/mark3labs/mcp-go v1.0.0
 	github.com/stretchr/testify v1.11.1
 	modernc.org/sqlite v1.56.0
 )
