@@ -125,6 +125,7 @@ if [ -f "$OPENCODE_CONFIG" ]; then
       tmp=$(mktemp /tmp/ilnamiqui-uninstall.XXXXXXXX)
       if jq --arg p "$PLUGIN_ENTRY" '
         if .plugin then .plugin -= [$p] | if .plugin == [] then del(.plugin) else . end else . end |
+        if .plugins then .plugins -= [$p] | if .plugins == [] then del(.plugins) else . end else . end |
         del(.mcp["ilnamiqui"]) | if .mcp == {} then del(.mcp) else . end
       ' "$OPENCODE_CONFIG" > "$tmp" 2>/dev/null; then
         mv "$tmp" "$OPENCODE_CONFIG"
@@ -147,6 +148,10 @@ if 'plugin' in data and isinstance(data['plugin'], list):
     data['plugin'] = [p for p in data['plugin'] if p != entry]
     if not data['plugin']:
         del data['plugin']
+if 'plugins' in data and isinstance(data['plugins'], list):
+    data['plugins'] = [p for p in data['plugins'] if p != entry]
+    if not data['plugins']:
+        del data['plugins']
 if 'mcp' in data and 'ilnamiqui' in data['mcp']:
     del data['mcp']['ilnamiqui']
     if not data['mcp']:
