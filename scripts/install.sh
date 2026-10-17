@@ -6,6 +6,7 @@ set -euo pipefail
 #        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --target opencode
 #        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --target claude
 #        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --version v1.0.0
+#        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --opencode-version v1
 #        curl -fsSL https://raw.githubusercontent.com/beabys/ilnamiqui/main/scripts/install.sh | bash -s -- --dry-run
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ GH_API="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
 VERSION=""
 DRY_RUN=false
 TARGET=""
+OPENCODE_VERSION=""
 
 # ─── Detect OS & Arch ─────────────────────────────────────────────────────────
 detect_os() {
@@ -39,6 +41,71 @@ detect_arch() {
     aarch64|arm64) echo "arm64" ;;
     *)             echo "unknown" ;;
   esac
+}
+
+# Detect opencode plugin version (v1 or v2).
+# Precedence: --opencode-version flag > OPENCODE_PLUGIN_VERSION env > opencode --version > fallback v2.
+detect_opencode_version() {
+  # 1. Explicit flag already captured in OPENCODE_VERSION
+  if [ -n "$OPENCODE_VERSION" ]; then
+    case "$OPENCODE_VERSION" in
+      v1|1) echo "v1"; return 0 ;;
+      v2|2) echo "v2"; return 0 ;;
+      *)
+        error "Invalid --opencode-version '$OPENCODE_VERSION'. Use 'v1' or 'v2'."
+        return 1
+        ;;
+    esac
+  fi
+
+  # 2. Env var override
+  if [ -n "${OPENCODE_PLUGIN_VERSION:-}" ]; then
+    case "$OPENCODE_PLUGIN_VERSION" in
+      v1|1) echo "v1"; return 0 ;;
+      v2|2) echo "v2"; return 0 ;;
+      *)
+        error "Invalid OPENCODE_PLUGIN_VERSION='$OPENCODE_PLUGIN_VERSION'. Use 'v1' or 'v2'."
+        return 1
+        ;;
+    esac
+  fi
+
+  # 3. Probe opencode --version
+  # Sandbox into a throwaway HOME so opencode's own side-effects
+  # (cache/state/config dirs) never land in the caller's real $HOME.
+  # All XDG base dirs redirected to the sandbox; removed afterwards on every path.
+  if command -v opencode &>/dev/null; then
+    local raw major probe_home
+    probe_home=$(mktemp -d)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$probe_home'" EXIT
+    mkdir -p "$probe_home/tmp"
+    raw=$(
+      HOME="$probe_home" \
+      TMPDIR="$probe_home/tmp" \
+      XDG_CONFIG_HOME="$probe_home/.config" \
+      XDG_DATA_HOME="$probe_home/.local/share" \
+      XDG_CACHE_HOME="$probe_home/.cache" \
+      XDG_STATE_HOME="$probe_home/.local/state" \
+      opencode --version 2>/dev/null | head -1
+    ) || true
+    rm -rf "$probe_home"
+    trap - EXIT
+    # Extract semantic version pattern (X.Y.Z) from first line, then get major.
+    # Handles: "opencode v2.0.29", "2.0.29", "v1.5.0", etc.
+    # If no version pattern found, major stays empty → fallback.
+    major=$(printf '%s' "$raw" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 | cut -d. -f1) || true
+    if [ -n "$major" ]; then
+      if [ "$major" -ge 2 ] 2>/dev/null; then
+        echo "v2"; return 0
+      else
+        echo "v1"; return 0
+      fi
+    fi
+  fi
+
+  # 4. Fallback: v2
+  echo "v2"
 }
 
 OS=$(detect_os)
@@ -65,12 +132,16 @@ while [[ $# -gt 0 ]]; do
       VERSION="$2"
       shift 2
       ;;
+    --opencode-version)
+      OPENCODE_VERSION="$2"
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=true
       shift
       ;;
     *)
-      echo "Usage: $0 [--target opencode|claude] [--version VERSION] [--dry-run]"
+      echo "Usage: $0 [--target opencode|claude] [--version VERSION] [--opencode-version v1|v2] [--dry-run]"
       exit 1
       ;;
   esac
@@ -101,6 +172,13 @@ else
     2|claude) TARGET="claude" ;;
     *) TARGET="opencode" ;;
   esac
+fi
+
+# ─── Resolve opencode plugin version (v1/v2) ──────────────────────────────────
+if [ "$TARGET" = "opencode" ]; then
+  OPENCODE_VERSION_RESOLVED=$(detect_opencode_version) || exit 1
+else
+  OPENCODE_VERSION_RESOLVED=""
 fi
 
 # ─── Resolve version ──────────────────────────────────────────────────────────
@@ -151,7 +229,7 @@ MCP_BINARY_PATH="${BIN_DIR}/${MCP_BINARY_NAME}"
 
 # URLs
 OPENCODE_SKILL_REPO_PATH="${RAW_BASE}/opencode/skill/SKILL.md"
-OPENCODE_PLUGIN_REPO_PATH="${RAW_BASE}/opencode/plugin/ilnamiqui.ts"
+# OPENCODE_PLUGIN_REPO_PATH is set per-version after detection (see opencode branch)
 CLAUDE_SKILL_REPO_PATH="${RAW_BASE}/claude/skill/SKILL.md"
 HOOK_SESSION_START_REPO="${RAW_BASE}/claude/hooks/ilnamiqui-session-start.sh"
 HOOK_PRECOMPACT_REPO="${RAW_BASE}/claude/hooks/ilnamiqui-precompact.sh"
@@ -286,14 +364,21 @@ echo "  ilnamiqui installer"
 echo "  Version: $VERSION"
 echo "  OS: $OS  Arch: $ARCH"
 echo "  Target: $TARGET"
+if [ "$TARGET" = "opencode" ] && [ -n "$OPENCODE_VERSION_RESOLVED" ]; then
+  echo "  Opencode plugin version: $OPENCODE_VERSION_RESOLVED"
+fi
 echo ""
 
 # ── Steps common to both targets ──────────────────────────────────────────────
 
 # 1. Create directories
 action "Creating directories..."
-mkdir -p "$BIN_DIR"
-info "  ${BIN_DIR}/"
+if [ "$DRY_RUN" = true ]; then
+  info "[dry-run] Would create directory: ${BIN_DIR}/"
+else
+  mkdir -p "$BIN_DIR"
+  info "  ${BIN_DIR}/"
+fi
 
 # 2. Download and extract binary archive (contains both binaries)
 echo ""
@@ -348,33 +433,62 @@ fi
 # ── Target-specific steps ──────────────────────────────────────────────────────
 case "$TARGET" in
   opencode)
+    # Set per-version source path and config key
+    case "$OPENCODE_VERSION_RESOLVED" in
+      v1)
+        OPENCODE_PLUGIN_REPO_PATH="${RAW_BASE}/opencode/v1/plugin/ilnamiqui.ts"
+        OPENCODE_CONFIG_KEY="plugin"
+        ;;
+      v2)
+        OPENCODE_PLUGIN_REPO_PATH="${RAW_BASE}/opencode/v2/plugin/ilnamiqui.ts"
+        OPENCODE_CONFIG_KEY="plugins"
+        ;;
+    esac
+
     # 3. Download SKILL.md
     echo ""
     action "Downloading opencode skill..."
-    mkdir -p "$OPENCODE_SKILL_DIR"
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would create directory: ${OPENCODE_SKILL_DIR}/"
+    else
+      mkdir -p "$OPENCODE_SKILL_DIR"
+    fi
     download "$OPENCODE_SKILL_REPO_PATH" "${OPENCODE_SKILL_DIR}/SKILL.md" "SKILL.md"
 
     # 4. Download plugin.ts
     echo ""
-    action "Downloading plugin..."
-    mkdir -p "$OPENCODE_PLUGIN_DIR"
-    download "$OPENCODE_PLUGIN_REPO_PATH" "${OPENCODE_PLUGIN_DIR}/ilnamiqui.ts" "plugin.ts"
+    action "Downloading plugin (${OPENCODE_VERSION_RESOLVED})..."
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would create directory: ${OPENCODE_PLUGIN_DIR}/"
+    else
+      mkdir -p "$OPENCODE_PLUGIN_DIR"
+    fi
+    download "$OPENCODE_PLUGIN_REPO_PATH" "${OPENCODE_PLUGIN_DIR}/ilnamiqui.ts" "plugin.ts (${OPENCODE_VERSION_RESOLVED})"
 
     # 5. Register plugin in opencode.json
     echo ""
-    action "Updating opencode.json..."
-    if [ ! -f "$OPENCODE_CONFIG" ]; then
-      echo '{}' > "$OPENCODE_CONFIG"
-      info "Created ${OPENCODE_CONFIG}"
+    action "Updating opencode.json (key: ${OPENCODE_CONFIG_KEY})..."
+    if [ "$DRY_RUN" = true ]; then
+      if [ ! -f "$OPENCODE_CONFIG" ]; then
+        info "[dry-run] Would create ${OPENCODE_CONFIG}"
+      fi
+    else
+      if [ ! -f "$OPENCODE_CONFIG" ]; then
+        echo '{}' > "$OPENCODE_CONFIG"
+        info "Created ${OPENCODE_CONFIG}"
+      fi
     fi
 
     PLUGIN_ENTRY="./plugins/ilnamiqui.ts"
-    update_json "$OPENCODE_CONFIG" \
-      ".plugin |= ((if type == \"string\" then [.] else . // [] end) + [\"./plugins/ilnamiqui.ts\"] | unique)" \
-      "if isinstance(data.get('plugin'), str): data['plugin'] = [data['plugin']]
-data.setdefault('plugin', [])
+    # jq filter: handle both string→array conversion and array append, dedupe
+    JQ_FILTER=".${OPENCODE_CONFIG_KEY} |= ((if type == \"string\" then [.] else . // [] end) + [\"${PLUGIN_ENTRY}\"] | unique)"
+    # python3 snippet: handle string→list conversion, setdefault, dedupe
+    PY_SNIPPET="if isinstance(data.get('${OPENCODE_CONFIG_KEY}'), str): data['${OPENCODE_CONFIG_KEY}'] = [data['${OPENCODE_CONFIG_KEY}']]
+data.setdefault('${OPENCODE_CONFIG_KEY}', [])
 entry = '${PLUGIN_ENTRY}'
-if entry not in data['plugin']: data['plugin'].append(entry)"
+if entry not in data['${OPENCODE_CONFIG_KEY}']: data['${OPENCODE_CONFIG_KEY}'].append(entry)"
+
+    update_json "$OPENCODE_CONFIG" "$JQ_FILTER" "$PY_SNIPPET"
 
     # 6. Create CLI symlink (opencode only)
     if [ "$DRY_RUN" = true ]; then
@@ -395,11 +509,15 @@ if entry not in data['plugin']: data['plugin'].append(entry)"
     # 3. Download SKILL.md
     echo ""
     action "Downloading Claude Code skill..."
-    mkdir -p "$CLAUDE_SKILL_DIR"
-    # Remove old CLAUDE.md if exists (rename from previous installs)
-    if [ -f "${CLAUDE_SKILL_DIR}/CLAUDE.md" ] && [ "$DRY_RUN" = false ]; then
-      rm -f "${CLAUDE_SKILL_DIR}/CLAUDE.md"
-      info "Removed old CLAUDE.md (replaced by SKILL.md)"
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would create directory: ${CLAUDE_SKILL_DIR}/"
+    else
+      mkdir -p "$CLAUDE_SKILL_DIR"
+      # Remove old CLAUDE.md if exists (rename from previous installs)
+      if [ -f "${CLAUDE_SKILL_DIR}/CLAUDE.md" ]; then
+        rm -f "${CLAUDE_SKILL_DIR}/CLAUDE.md"
+        info "Removed old CLAUDE.md (replaced by SKILL.md)"
+      fi
     fi
 
     download "$CLAUDE_SKILL_REPO_PATH" "$CLAUDE_SKILL_PATH" "SKILL.md"
@@ -407,31 +525,40 @@ if entry not in data['plugin']: data['plugin'].append(entry)"
     # 4. Register MCP server in claude.json
     echo ""
     action "Updating claude.json..."
-    if [ ! -f "$CLAUDE_CONFIG" ]; then
-      mkdir -p "$(dirname "$CLAUDE_CONFIG")"
-      echo '{}' > "$CLAUDE_CONFIG"
-      info "Created ${CLAUDE_CONFIG}"
+    if [ "$DRY_RUN" = true ]; then
+      if [ ! -f "$CLAUDE_CONFIG" ]; then
+        info "[dry-run] Would create ${CLAUDE_CONFIG}"
+      fi
+    else
+      if [ ! -f "$CLAUDE_CONFIG" ]; then
+        mkdir -p "$(dirname "$CLAUDE_CONFIG")"
+        echo '{}' > "$CLAUDE_CONFIG"
+        info "Created ${CLAUDE_CONFIG}"
+      fi
     fi
 
     MCP_COMMAND="$MCP_BINARY_PATH"
-    if command -v jq &>/dev/null; then
-      tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
-      if jq --arg cmd "$MCP_COMMAND" '
-        .mcpServers //= {} |
-        .mcpServers["ilnamiqui"] = {
-          "command": $cmd,
-          "args": []
-        }
-      ' "$CLAUDE_CONFIG" > "$tmp" 2>/dev/null; then
-        mv "$tmp" "$CLAUDE_CONFIG"
-        info "Updated ${CLAUDE_CONFIG} using jq"
-      else
-        rm -f "$tmp"
-        error "jq failed to update ${CLAUDE_CONFIG}"
-        exit 1
-      fi
-    elif command -v python3 &>/dev/null; then
-      python3 -c "
+    if [ "$DRY_RUN" = true ]; then
+      info "[dry-run] Would update ${CLAUDE_CONFIG} to register MCP server"
+    else
+      if command -v jq &>/dev/null; then
+        tmp=$(mktemp /tmp/ilnamiqui.XXXXXXXX)
+        if jq --arg cmd "$MCP_COMMAND" '
+          .mcpServers //= {} |
+          .mcpServers["ilnamiqui"] = {
+            "command": $cmd,
+            "args": []
+          }
+        ' "$CLAUDE_CONFIG" > "$tmp" 2>/dev/null; then
+          mv "$tmp" "$CLAUDE_CONFIG"
+          info "Updated ${CLAUDE_CONFIG} using jq"
+        else
+          rm -f "$tmp"
+          error "jq failed to update ${CLAUDE_CONFIG}"
+          exit 1
+        fi
+      elif command -v python3 &>/dev/null; then
+        python3 -c "
 import json
 file = '${CLAUDE_CONFIG}'
 try:
@@ -449,15 +576,16 @@ with open(file, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')
 " || {
-        error "python3 script failed to update ${CLAUDE_CONFIG}"
+          error "python3 script failed to update ${CLAUDE_CONFIG}"
+          exit 1
+        }
+        info "Updated ${CLAUDE_CONFIG} using python3"
+      else
+        error "Neither jq nor python3 found. Cannot update ${CLAUDE_CONFIG}"
+        error "Add this to ${CLAUDE_CONFIG}:"
+        error "  { \"mcpServers\": { \"ilnamiqui\": { \"command\": \"${MCP_COMMAND}\", \"args\": [] } } }"
         exit 1
-      }
-      info "Updated ${CLAUDE_CONFIG} using python3"
-    else
-      error "Neither jq nor python3 found. Cannot update ${CLAUDE_CONFIG}"
-      error "Add this to ${CLAUDE_CONFIG}:"
-      error "  { \"mcpServers\": { \"ilnamiqui\": { \"command\": \"${MCP_COMMAND}\", \"args\": [] } } }"
-      exit 1
+      fi
     fi
 
     # 5. Install lifecycle hooks
@@ -591,7 +719,8 @@ echo ""
 echo "  ✓ ilnamiqui installed for ${TARGET}"
 echo "  Binary: ${BINARY_PATH}"
 if [ "$TARGET" = "opencode" ]; then
-  echo "  Plugin: registered"
+  echo "  Plugin: registered (${OPENCODE_VERSION_RESOLVED})"
+  echo "  Config key: ${OPENCODE_CONFIG_KEY}"
   echo "  Skill: installed"
 elif [ "$TARGET" = "claude" ]; then
   echo "  MCP server: ${MCP_BINARY_PATH}"

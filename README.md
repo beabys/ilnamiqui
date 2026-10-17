@@ -127,8 +127,8 @@ Every new chat picks up right where the last one left off — automatically.
 
 ## opencode Integration
 
-The TypeScript plugin (`opencode/plugin/ilnamiqui.ts`) hooks into opencode's
-lifecycle automatically — no manual commands needed.
+The TypeScript plugin (version-specific: `opencode/v1/plugin/ilnamiqui.ts` or `opencode/v2/plugin/ilnamiqui.ts`) hooks into opencode's
+lifecycle automatically — no manual commands needed. The installer auto-detects your opencode version and fetches the correct plugin.
 
 ### Automatic Lifecycle Hooks
 

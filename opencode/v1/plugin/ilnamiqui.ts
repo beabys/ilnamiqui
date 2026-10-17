@@ -351,9 +351,7 @@ const plugin: Plugin = async ({ $ }) => {
       endSession: tool({
         description: "Save session context and end the current ilnamiqui session. Call when the conversation task is complete, user says goodbye, or work is done.",
         args: {
-          summary: tool.schema.string({
-            description: "One-line summary of what was accomplished this session",
-          }),
+          summary: tool.schema.string().describe("One-line summary of what was accomplished this session"),
         },
         async execute(args, context) {
           const now = new Date().toISOString()
