@@ -128,6 +128,8 @@ ilnamiqui load --pretty
 - **`mode="content"`**: searches **content/value** using FTS5 full-text search (token-aware, supports prefix) — use when key search isn't enough.
 - **`mode="both"`**: searches both keys AND content.
 - **FTS5 tip**: content search is word-based. `search_memories(query="hex", mode="content")` matches entries with words starting with "hex" (hexagonal, hexagon). NOT substring LIKE — `search_memories(query="lago", mode="content")` will NOT match "hexagonal".
+- **Flags anywhere**: flags may appear before or after the query (CLI only; MCP parameters are named).
+- **Terminator**: use `--` to pass queries starting with `-` (e.g., `ilnamiqui search -- -foo`).
 
 ---
 

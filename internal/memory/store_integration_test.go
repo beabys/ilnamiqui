@@ -356,4 +356,87 @@ func TestIntegrationListKeys_AfterInserts(t *testing.T) {
 	}
 }
 
+func TestIntegrationSearchEntries_ContentMode_SpecialChars(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	db := fileDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "arch", "hexagonal design, ports+adapters")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "date", "meeting 2026-01-01 notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Content search with "-" in query — must not error
+	entries, err := store.SearchEntries(ctx, "2026-01-01", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries 2026-01-01 error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for '2026-01-01', got %d", len(entries))
+	}
+
+	// Content search with "+" in query — must not error
+	entries, err = store.SearchEntries(ctx, "ports+adapters", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries ports+adapters error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for 'ports+adapters', got %d", len(entries))
+	}
+
+	// All-non-alnum query — zero rows, no error
+	entries, err = store.SearchEntries(ctx, "()*", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries ()* error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries for '()*', got %d", len(entries))
+	}
+
+	// "c++" with no c-token — zero rows, no error
+	entries, err = store.SearchEntries(ctx, "c++", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries c++ error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries for 'c++', got %d", len(entries))
+	}
+}
+
+func TestIntegrationSearchEntries_KeyMode_LIKEEscape(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	db := fileDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "100%done", "value1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "100", "value2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Key search "100%" should match only "100%done" (literal %)
+	entries, err := store.SearchEntries(ctx, "100%", SearchModeKey, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries 100%% error: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Key != "100%done" {
+		t.Fatalf("expected only '100%%done', got %v", entries)
+	}
+}
+
 

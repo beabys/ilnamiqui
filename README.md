@@ -118,7 +118,7 @@ ilnamiqui save "bug" "auth token expired — fixed middleware check"
 ilnamiqui load --pretty
 
 # 4. Find specifics instantly
-ilnamiqui search "middleware" --after 2026-01-01 --before 2026-06-01
+ilnamiqui search "middleware" --mode both --after 2026-01-01 --before 2026-06-01
 ```
 
 Every new chat picks up right where the last one left off — automatically.
@@ -172,15 +172,40 @@ sync is opencode-specific (plugin-based).
 | `list [--limit N] [--pretty]` | List recent sessions |
 | `keys [--limit N] [--pretty]` | List distinct keys in use (critical first, then by recency) |
 | `key update [--critical[=true\|false]] <key>` | Mark/unmark a key as critical (protected from prune) |
-| `search <query> [--mode key\|content\|both] [--after DATE] [--before DATE] [--limit N] [--pretty]` | Search memories by key (default, indexed), content (FTS5), or both |
+| `search <query> [--mode key\|content\|both] [--after DATE] [--before DATE] [--limit N] [--pretty]` | Search memories; default `--mode key` (indexed prefix). Flags may appear before or after the query. |
 | `prune --before <date> [--key <key>]` | Delete non-critical memory entries older than date |
 | `delete <id>` | Delete a memory entry by ID |
 | `session start` | Start a new session manually |
 | `session end --summary "..."` | End the active session with a summary |
 | `version` | Print CLI version |
-| `help` | Show usage |
+| `help [command]` | Show top-level help, or detailed help for a specific command |
 
 Commands `save`, `load`, `list`, `keys`, and `search` accept `--pretty` for human-readable tables instead of JSON output.
+
+### Search modes
+
+| Mode | Searches | Match |
+|------|----------|-------|
+| `key` (default) | keys only | prefix match, indexed, fast |
+| `content` | key + value | FTS5 token-prefix (word-based) |
+| `both` | key + value (union) | union of key and content |
+
+**FTS5 caveat:** `content` mode is token-prefix, not substring. `hex` matches `hexagonal` (word starts with `hex`); `lago` does NOT match `hexagonal` (no word starts with `lago`).
+
+**Examples:**
+
+```bash
+ilnamiqui search "arch" --mode content --pretty           # FTS5 over keys + values
+ilnamiqui search "middleware" --mode both                 # union: key prefix OR content token
+ilnamiqui search "bug" --mode=content --limit=5           # flags may use = or space
+ilnamiqui search --after 2026-01-01 --before 2026-06-01   # date-only range (no query)
+ilnamiqui search "c++" --mode content                     # metachar safe, no error
+```
+
+**Notes:**
+- Flags may appear before or after the query.
+- Use `--` to pass queries starting with `-` (e.g., `ilnamiqui search -- -foo`).
+- When `--mode key` finds nothing, stderr prints: `no entries found — try --mode both to search values`.
 
 ---
 

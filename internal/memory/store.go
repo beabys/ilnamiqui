@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // SearchMode controls which field(s) the search targets.
@@ -76,16 +77,30 @@ func (s *Store) SearchEntries(ctx context.Context, queryStr string, mode SearchM
 	var args []any
 
 	if queryStr != "" {
+		likePattern := escapeLIKE(queryStr) + "%"
 		switch mode {
 		case SearchModeContent:
-			conditions = append(conditions, `id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)`)
-			args = append(args, toFTSQuery(queryStr))
+			fts := toFTSQuery(queryStr)
+			if fts == "" {
+				// No alnum tokens → zero rows, no SQL error.
+				conditions = append(conditions, "0")
+			} else {
+				conditions = append(conditions, `id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)`)
+				args = append(args, fts)
+			}
 		case SearchModeBoth:
-			conditions = append(conditions, `(key LIKE ? OR id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?))`)
-			args = append(args, queryStr+"%", toFTSQuery(queryStr))
+			fts := toFTSQuery(queryStr)
+			if fts == "" {
+				// FTS side yields nothing; keep only the key LIKE branch.
+				conditions = append(conditions, "key LIKE ? ESCAPE '!'")
+				args = append(args, likePattern)
+			} else {
+				conditions = append(conditions, `(key LIKE ? ESCAPE '!' OR id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?))`)
+				args = append(args, likePattern, fts)
+			}
 		default: // SearchModeKey
-			conditions = append(conditions, "key LIKE ?")
-			args = append(args, queryStr+"%")
+			conditions = append(conditions, "key LIKE ? ESCAPE '!'")
+			args = append(args, likePattern)
 		}
 	}
 
@@ -272,14 +287,39 @@ func (s *Store) queryKeyInfo(ctx context.Context, query string, args ...any) ([]
 }
 
 // toFTSQuery converts user query to FTS5 prefix query syntax.
-// Each word gets "*" appended so "arch design" matches tokens "architecture" "design".
+// Rules:
+//   - Split on whitespace.
+//   - Each token: drop if it contains no letter/digit (prevents FTS5 syntax errors).
+//   - Otherwise: double embedded double-quotes, wrap as "tok"* so metacharacters
+//     like -, +, :, (, ) are treated as literal text inside a phrase prefix.
+//   - Returns "" when no tokens survive — caller must handle empty case (no SQL).
 func toFTSQuery(s string) string {
 	words := strings.Fields(s)
-	if len(words) == 0 {
-		return s
+	out := make([]string, 0, len(words))
+	for _, w := range words {
+		if !hasAlnum(w) {
+			continue
+		}
+		escaped := strings.ReplaceAll(w, `"`, `""`)
+		out = append(out, `"`+escaped+`"*`)
 	}
-	for i, w := range words {
-		words[i] = w + "*"
+	return strings.Join(out, " ")
+}
+
+func hasAlnum(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
 	}
-	return strings.Join(words, " ")
+	return false
+}
+
+// escapeLIKE escapes LIKE special characters using '!' as the escape char.
+// Order matters: escape '!' first, then '%' and '_'.
+func escapeLIKE(s string) string {
+	s = strings.ReplaceAll(s, "!", "!!")
+	s = strings.ReplaceAll(s, "%", "!%")
+	s = strings.ReplaceAll(s, "_", "!_")
+	return s
 }

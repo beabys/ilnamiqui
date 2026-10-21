@@ -135,6 +135,8 @@ ilnamiqui load --pretty                # refresh all context
 - **`--mode content`**: searches **content/value** using FTS5 full-text search (token-aware, supports prefix with `*`) — ideal when key search isn't enough.
 - **`--mode both`**: searches both keys AND content.
 - **FTS5 tip**: content search is word-based. `ilnamiqui search "hex" --mode content` matches entries containing words starting with "hex" (hexagonal, hexagon). It is NOT substring LIKE — `ilnamiqui search "lago" --mode content` will NOT match "hexagonal".
+- **Flags anywhere**: flags may appear before or after the query (e.g., `search "arch" --mode content` or `search --mode content "arch"`).
+- **Terminator**: use `--` to pass queries starting with `-` (e.g., `ilnamiqui search -- -foo`).
 
 ---
 

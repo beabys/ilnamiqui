@@ -734,17 +734,156 @@ func TestToFTSQuery(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"hexagonal", "hexagonal*"},
-		{"hexagonal architecture", "hexagonal* architecture*"},
-		{"  spaced  words  ", "spaced* words*"},
+		{"hexagonal", "\"hexagonal\"*"},
+		{"hexagonal architecture", "\"hexagonal\"* \"architecture\"*"},
+		{"  spaced  words  ", "\"spaced\"* \"words\"*"},
 		{"", ""},
-		{"single", "single*"},
+		{"single", "\"single\"*"},
+		// Special chars preserved via quoting
+		{"2026-01-01", "\"2026-01-01\"*"},
+		{"c++", "\"c++\"*"},
+		{"foo-bar", "\"foo-bar\"*"},
+		{"a:b", "\"a:b\"*"},
+		{"()*", ""},                            // no alnum → empty
+		{"---", ""},                            // no alnum → empty
+		{"hex with +++", "\"hex\"* \"with\"*"}, // +++ dropped, hex + with kept
 	}
 	for _, tt := range tests {
 		got := toFTSQuery(tt.input)
 		if got != tt.expected {
 			t.Errorf("toFTSQuery(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestEscapeLIKE(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"plain", "plain"},
+		{"100%", "100!%"},
+		{"a_b", "a!_b"},
+		{"bang!", "bang!!"},
+		{"a%b_c!d", "a!%b!_c!!d"},
+	}
+	for _, tt := range tests {
+		got := escapeLIKE(tt.input)
+		if got != tt.expected {
+			t.Errorf("escapeLIKE(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestSearchEntries_ContentMode_SpecialChars(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "arch", "hexagonal design with ports+adapters")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "date", "entry from 2026-01-01 meeting notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// "c++" → no match but must not error
+	entries, err := store.SearchEntries(ctx, "c++", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries c++ error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries for 'c++', got %d", len(entries))
+	}
+
+	// "2026-01-01" → matches date entry
+	entries, err = store.SearchEntries(ctx, "2026-01-01", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries 2026-01-01 error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for '2026-01-01', got %d", len(entries))
+	}
+
+	// "ports+adapters" → matches arch entry
+	entries, err = store.SearchEntries(ctx, "ports+adapters", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries ports+adapters error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry for 'ports+adapters', got %d", len(entries))
+	}
+
+	// All non-alnum query → zero rows, no error
+	entries, err = store.SearchEntries(ctx, "()", SearchModeContent, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries () error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries for '()', got %d", len(entries))
+	}
+}
+
+func TestSearchEntries_KeyMode_LIKEEscape(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "100%done", "value1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "100", "value2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "a_b", "value3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveEntry(ctx, "test-session", "abc", "value4")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Search "100%" should match only "100%done" (literal %, not wildcard)
+	entries, err := store.SearchEntries(ctx, "100%", SearchModeKey, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries 100%% error: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Key != "100%done" {
+		t.Fatalf("expected only '100%%done', got %v", entries)
+	}
+
+	// Search "a_b" should match only "a_b" (literal _, not wildcard)
+	entries, err = store.SearchEntries(ctx, "a_b", SearchModeKey, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries a_b error: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Key != "a_b" {
+		t.Fatalf("expected only 'a_b', got %v", entries)
+	}
+}
+
+func TestSearchEntries_BothMode_AllSpecialChars(t *testing.T) {
+	db := openTestDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.SaveEntry(ctx, "test-session", "arch", "value")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// both mode with all-special query: FTS empty → fall back to key LIKE only, no error
+	entries, err := store.SearchEntries(ctx, "()", SearchModeBoth, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchEntries both () error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
 	}
 }
 
