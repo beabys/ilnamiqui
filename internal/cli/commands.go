@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -74,6 +76,9 @@ func (c *CLI) Run(args []string) error {
 	case VERSION:
 		return cmdVersion()
 	case HELP, "--help", "-h":
+		if len(cmdArgs) > 0 {
+			return printCommandHelp(cmdArgs[0])
+		}
 		return printHelp()
 	default:
 		return fmt.Errorf("unknown command %q — run 'ilnamiqui help' for usage", cmd)
@@ -82,9 +87,9 @@ func (c *CLI) Run(args []string) error {
 
 // cmdInit initializes the database.
 func (c *CLI) cmdInit(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs := newCommandFS("init")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("init", err)
 	}
 	resp, err := c.svc.Init(context.Background(), &service.InitRequest{})
 	if err != nil {
@@ -96,17 +101,18 @@ func (c *CLI) cmdInit(args []string) error {
 
 // cmdSave saves a memory entry.
 func (c *CLI) cmdSave(args []string) error {
-	fs := flag.NewFlagSet("save", flag.ContinueOnError)
+	fs := newCommandFS("save")
 	pretty := fs.Bool("pretty", false, "human-readable output")
 	agent := fs.String("agent", "opencode", "agent identifier")
-	if err := fs.Parse(args); err != nil {
-		return err
+	positionals, err := parseFlagsAnywhere(fs, args, map[string]bool{"agent": true})
+	if err != nil {
+		return helpOrErr("save", err)
 	}
-	if fs.NArg() < 2 {
+	if len(positionals) < 2 {
 		return fmt.Errorf("usage: ilnamiqui save <key> <value>")
 	}
-	key := fs.Arg(0)
-	value := strings.Join(fs.Args()[1:], " ")
+	key := positionals[0]
+	value := strings.Join(positionals[1:], " ")
 
 	resp, err := c.svc.Save(context.Background(), &service.SaveRequest{Key: key, Value: value, Agent: *agent})
 	if err != nil {
@@ -127,12 +133,12 @@ func (c *CLI) cmdSave(args []string) error {
 
 // cmdLoad loads memory entries.
 func (c *CLI) cmdLoad(args []string) error {
-	fs := flag.NewFlagSet("load", flag.ContinueOnError)
+	fs := newCommandFS("load")
 	sessionFlag := fs.Bool("session", false, "load entries for active session only")
 	pretty := fs.Bool("pretty", false, "human-readable output")
 	limit := fs.Int("limit", 0, "maximum number of entries to return (0 = no limit)")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("load", err)
 	}
 
 	resp, err := c.svc.Load(context.Background(), &service.LoadRequest{
@@ -151,11 +157,11 @@ func (c *CLI) cmdLoad(args []string) error {
 
 // cmdList lists recent sessions.
 func (c *CLI) cmdList(args []string) error {
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs := newCommandFS("list")
 	limit := fs.Int("limit", 10, "number of sessions to list")
 	pretty := fs.Bool("pretty", false, "human-readable output")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("list", err)
 	}
 
 	resp, err := c.svc.ListSessions(context.Background(), &service.ListSessionsRequest{Limit: *limit})
@@ -171,11 +177,11 @@ func (c *CLI) cmdList(args []string) error {
 
 // cmdKeys lists distinct memory keys.
 func (c *CLI) cmdKeys(args []string) error {
-	fs := flag.NewFlagSet("keys", flag.ContinueOnError)
+	fs := newCommandFS("keys")
 	pretty := fs.Bool("pretty", false, "human-readable output")
 	limit := fs.Int("limit", 0, "maximum number of keys to return (0 = no limit)")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("keys", err)
 	}
 
 	resp, err := c.svc.ListKeys(context.Background(), &service.ListKeysRequest{Limit: *limit})
@@ -205,10 +211,10 @@ func (c *CLI) cmdKey(args []string) error {
 }
 
 func (c *CLI) cmdKeyUpdate(args []string) error {
-	fs := flag.NewFlagSet("key update", flag.ContinueOnError)
+	fs := newCommandFS("key update")
 	critical := fs.Bool("critical", false, "set critical flag (use --critical or --critical=true)")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("key update", err)
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("usage: ilnamiqui key update [--critical[=true|false]] <keyname>")
@@ -227,17 +233,20 @@ func (c *CLI) cmdKeyUpdate(args []string) error {
 
 // cmdSearch searches memory entries.
 func (c *CLI) cmdSearch(args []string) error {
-	fs := flag.NewFlagSet("search", flag.ContinueOnError)
+	fs := newCommandFS("search")
 	pretty := fs.Bool("pretty", false, "human-readable output")
 	limit := fs.Int("limit", 0, "maximum number of entries to return (0 = no limit)")
 	after := fs.String("after", "", "only entries after this date (RFC3339 or YYYY-MM-DD)")
 	before := fs.String("before", "", "only entries before this date (RFC3339 or YYYY-MM-DD)")
 	mode := fs.String("mode", "key", "search mode: key (default, uses index), content (value FTS5), both (key+content)")
-	if err := fs.Parse(args); err != nil {
-		return err
+	positionals, err := parseFlagsAnywhere(fs, args, map[string]bool{
+		"limit": true, "after": true, "before": true, "mode": true,
+	})
+	if err != nil {
+		return helpOrErr("search", err)
 	}
 
-	query := strings.Join(fs.Args(), " ")
+	query := strings.Join(positionals, " ")
 
 	switch *mode {
 	case "key", "content", "both":
@@ -278,6 +287,10 @@ func (c *CLI) cmdSearch(args []string) error {
 		return err
 	}
 
+	if len(resp.Entries) == 0 && *mode == "key" && query != "" {
+		fmt.Fprintln(os.Stderr, "no entries found — try --mode both to search values")
+	}
+
 	if *pretty {
 		return printEntriesTable(resp.Entries)
 	}
@@ -286,11 +299,11 @@ func (c *CLI) cmdSearch(args []string) error {
 
 // cmdPrune deletes non-critical memory entries older than the given date.
 func (c *CLI) cmdPrune(args []string) error {
-	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+	fs := newCommandFS("prune")
 	before := fs.String("before", "", "required — delete entries older than this date (YYYY-MM-DD or RFC3339)")
 	key := fs.String("key", "*", "key to prune (default: all non-critical keys)")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("prune", err)
 	}
 	if *before == "" {
 		return fmt.Errorf("usage: ilnamiqui prune --before <date> [--key <key>]")
@@ -312,9 +325,9 @@ func (c *CLI) cmdPrune(args []string) error {
 
 // cmdDelete deletes a memory entry.
 func (c *CLI) cmdDelete(args []string) error {
-	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+	fs := newCommandFS("delete")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("delete", err)
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("usage: ilnamiqui delete <id>")
@@ -350,10 +363,10 @@ func (c *CLI) cmdSession(args []string) error {
 }
 
 func (c *CLI) cmdSessionStart(args []string) error {
-	fs := flag.NewFlagSet("session start", flag.ContinueOnError)
+	fs := newCommandFS("session start")
 	agent := fs.String("agent", "opencode", "agent identifier")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("session start", err)
 	}
 	resp, err := c.svc.StartSession(context.Background(), &service.StartSessionRequest{Agent: *agent})
 	if err != nil {
@@ -364,11 +377,11 @@ func (c *CLI) cmdSessionStart(args []string) error {
 }
 
 func (c *CLI) cmdSessionEnd(args []string) error {
-	fs := flag.NewFlagSet("session end", flag.ContinueOnError)
+	fs := newCommandFS("session end")
 	summary := fs.String("summary", "", "session summary")
 	agent := fs.String("agent", "opencode", "agent identifier")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrErr("session end", err)
 	}
 	resp, err := c.svc.EndSession(context.Background(), &service.EndSessionRequest{Summary: *summary, Agent: *agent})
 	if err != nil {
@@ -392,33 +405,244 @@ Usage:
   ilnamiqui <command> [flags]
 
 Commands:
-  init                  Initialize database in .ilnamiqui/
-  save [--agent <agent>] <key> <value>
-                         Save a memory entry
-  load [--session] [--limit N]
-                         Load memory entries (all or current session)
-  list [--limit N]      List recent sessions
-  keys [--limit N] [--pretty]
-                         List distinct memory keys
-  key update [--critical[=true|false]] <key>
-                         Update critical flag on a memory key (default: false)
-  search <query> [--after DATE] [--before DATE] [--limit N]
-                         Search memory entries by key or value, optionally filtered by date
-  prune --before <date> [--key <key>]
-                         Delete non-critical memory entries older than date
-  delete <id>           Delete a memory entry by ID
-  session start [--agent <agent>]
-                         Start a new session
-  session end [--agent <agent>] [--summary "text"]
-                         End the active session
-  version               Print version
-  help                  Print this help
+  init                                                   Initialize database in .ilnamiqui/
+  save [--agent <agent>] <key> <value>                   Save a memory entry
+  load [--session] [--limit N] [--pretty]                Load memory entries (all or current session)
+  list [--limit N] [--pretty]                            List recent sessions
+  keys [--limit N] [--pretty]                            List distinct memory keys
+  key update [--critical[=true|false]] <key>             Update critical flag on a memory key (default: false)
+  search [--mode key|content|both] [--pretty] [--limit N] [--after DATE] [--before DATE] <query>
+                                                         Search memory entries by key or value
+  prune --before <date> [--key <key>]                    Delete non-critical memory entries older than date
+  delete <id>                                            Delete a memory entry by ID
+  session start [--agent <agent>]                        Start a new session
+  session end [--agent <agent>] [--summary "text"]       End the active session
+  version                                                Print version
+  help [command]                                         Print this help, or help for a specific command
+
+Global flags:
+  --pretty              Human-readable output (tables) instead of JSON (supported by most commands)
+  --                    Terminate flag scanning; everything after is treated as positional arguments
+
+Notes:
+  - Flags may appear before or after positional arguments for commands that support them (see "help <command>").
+  - Use "--" to pass arguments that begin with "-" as positionals (e.g. "ilnamiqui search -- -foo").
+  - Run "ilnamiqui help <command>" for detailed usage of a specific command.
+`
+	fmt.Print(help)
+	return nil
+}
+
+// newCommandFS creates a FlagSet with ContinueOnError and output discarded.
+// Used by all subcommands so that --help triggers ErrHelp instead of exiting.
+func newCommandFS(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	return fs
+}
+
+// helpOrErr converts flag.ErrHelp into a call to printCommandHelp(name).
+// Other errors pass through unchanged.
+func helpOrErr(name string, err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return printCommandHelp(name)
+	}
+	return err
+}
+
+// printCommandHelp prints help for a specific command.
+// Returns error for unknown commands.
+func printCommandHelp(name string) error {
+	parts := strings.Fields(name)
+	if len(parts) == 0 {
+		return fmt.Errorf("unknown command %q — run 'ilnamiqui help' for usage", name)
+	}
+	cmd := parts[0]
+	sub := ""
+	if len(parts) > 1 {
+		sub = parts[1]
+	}
+
+	var help string
+	switch cmd {
+	case "init":
+		help = `ilnamiqui init
+
+Usage:
+  ilnamiqui init
+
+Initialize the ilnamiqui database in .ilnamiqui/ directory.
 
 Flags:
-  --pretty              Human-readable output (tables) instead of JSON
-
-Use "ilnamiqui help <command>" for more details on a specific command.
+  (none)
 `
+	case "save":
+		help = `ilnamiqui save
+
+Usage:
+  ilnamiqui save [--agent <agent>] <key> <value>
+
+Save a memory entry. The --agent flag defaults to "opencode".
+
+Flags:
+  --agent <agent>   Agent identifier (default: "opencode")
+  --pretty          Human-readable output instead of JSON
+
+Notes:
+  - Flags may appear before or after positional arguments.
+  - Use "--" to pass values starting with "-" as the key or value.
+`
+	case "load":
+		help = `ilnamiqui load
+
+Usage:
+  ilnamiqui load [--session] [--limit N] [--pretty]
+
+Load memory entries. Use --session to load only entries from the current session.
+
+Flags:
+  --session         Load entries for active session only
+  --limit N         Maximum number of entries to return (0 = no limit, default: 0)
+  --pretty          Human-readable output instead of JSON
+`
+	case "list":
+		help = `ilnamiqui list
+
+Usage:
+  ilnamiqui list [--limit N] [--pretty]
+
+List recent sessions.
+
+Flags:
+  --limit N         Number of sessions to list (default: 10)
+  --pretty          Human-readable output instead of JSON
+`
+	case "keys":
+		help = `ilnamiqui keys
+
+Usage:
+  ilnamiqui keys [--limit N] [--pretty]
+
+List distinct memory keys.
+
+Flags:
+  --limit N         Maximum number of keys to return (0 = no limit, default: 0)
+  --pretty          Human-readable output instead of JSON
+`
+	case "key":
+		if sub == "update" || sub == "" {
+			help = `ilnamiqui key update
+
+Usage:
+  ilnamiqui key update [--critical[=true|false]] <key>
+
+Update the critical flag on a memory key. Critical keys are never pruned.
+
+Flags:
+  --critical[=true|false]   Set critical flag (default: false)
+`
+		} else {
+			return fmt.Errorf("unknown key subcommand %q — use 'update'", sub)
+		}
+	case "search":
+		help = `ilnamiqui search
+
+Usage:
+  ilnamiqui search [--mode key|content|both] [--pretty] [--limit N] [--after DATE] [--before DATE] <query>
+
+Search memory entries by key or value.
+
+Modes:
+  key       Prefix match on key (indexed, fast). Default mode.
+  content   FTS5 token-prefix search over key + value (slower, full-text).
+  both      Union of key and content modes.
+
+Flags:
+  --mode key|content|both   Search mode (default: key)
+  --pretty                  Human-readable output instead of JSON
+  --limit N                 Maximum number of entries to return (0 = no limit, default: 0)
+  --after DATE              Only entries after this date (RFC3339 or YYYY-MM-DD)
+  --before DATE             Only entries before this date (RFC3339 or YYYY-MM-DD)
+
+Notes:
+  - Flags may appear before or after the query.
+  - Use "--" to pass queries starting with "-" (e.g. "ilnamiqui search -- -foo").
+  - When mode=key returns no results, a hint suggests trying --mode both.
+`
+	case "prune":
+		help = `ilnamiqui prune
+
+Usage:
+  ilnamiqui prune --before <date> [--key <key>]
+
+Delete non-critical memory entries older than the specified date.
+
+Flags:
+  --before <date>   Required — delete entries older than this date (YYYY-MM-DD or RFC3339)
+  --key <key>       Key to prune (default: all non-critical keys)
+`
+	case "delete":
+		help = `ilnamiqui delete
+
+Usage:
+  ilnamiqui delete <id>
+
+Delete a memory entry by ID.
+
+Arguments:
+  <id>   Entry ID (integer)
+`
+	case "session":
+		switch sub {
+		case "start", "":
+			help = `ilnamiqui session start
+
+Usage:
+  ilnamiqui session start [--agent <agent>]
+
+Start a new session.
+
+Flags:
+  --agent <agent>   Agent identifier (default: "opencode")
+`
+		case "end":
+			help = `ilnamiqui session end
+
+Usage:
+  ilnamiqui session end [--agent <agent>] [--summary "text"]
+
+End the active session.
+
+Flags:
+  --agent <agent>       Agent identifier (default: "opencode")
+  --summary "text"      Session summary
+`
+		default:
+			return fmt.Errorf("unknown session subcommand %q — use 'start' or 'end'", sub)
+		}
+	case "version":
+		help = `ilnamiqui version
+
+Usage:
+  ilnamiqui version
+
+Print the ilnamiqui version.
+`
+	case "help":
+		help = `ilnamiqui help
+
+Usage:
+  ilnamiqui help [command]
+
+Print help for ilnamiqui or a specific command.
+
+Examples:
+  ilnamiqui help          Print top-level help
+  ilnamiqui help search   Print help for the search command
+`
+	default:
+		return fmt.Errorf("unknown command %q — run 'ilnamiqui help' for usage", name)
+	}
 	fmt.Print(help)
 	return nil
 }
@@ -434,6 +658,59 @@ func parseDate(s string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Time{}, fmt.Errorf("expected RFC3339 (2006-01-02T15:04:05Z) or YYYY-MM-DD (2006-01-02), got %q", s)
+}
+
+// parseFlagsAnywhere parses flags from args regardless of position.
+// Tokens starting with "-" (except bare "-") are treated as flags.
+// "--" stops flag scanning; everything after is positional.
+// valueFlags lists flag names that consume the next token as their value.
+// Unknown flags are passed through to fs.Parse, which will report an error.
+func parseFlagsAnywhere(fs *flag.FlagSet, args []string, valueFlags map[string]bool) ([]string, error) {
+	var flagTokens []string
+	var positionals []string
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// "--" terminator: rest are positionals
+		if arg == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+
+		// Flag detection: starts with "-" but not bare "-"
+		if len(arg) > 1 && arg[0] == '-' {
+			flagTokens = append(flagTokens, arg)
+
+			// If contains "=", value is embedded — don't consume next
+			if strings.Contains(arg, "=") {
+				continue
+			}
+
+			// Extract flag name
+			name := arg
+			if strings.HasPrefix(name, "--") {
+				name = name[2:]
+			} else {
+				name = name[1:]
+			}
+
+			// If flag takes a value, consume next token
+			if valueFlags[name] && i+1 < len(args) {
+				i++
+				flagTokens = append(flagTokens, args[i])
+			}
+			continue
+		}
+
+		// Positional
+		positionals = append(positionals, arg)
+	}
+
+	if err := fs.Parse(flagTokens); err != nil {
+		return nil, err
+	}
+	return positionals, nil
 }
 
 // printKeysTable writes keys as a human-readable table.
