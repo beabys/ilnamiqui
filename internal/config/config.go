@@ -8,12 +8,9 @@ import (
 )
 
 const (
-	ILNAMIQUI_DIR = ".ilnamiqui"
-	ILNAMIQUI_DB  = "ilnamiqui.db"
-	SENTINEL_FILE = ".initialized"
-)
-
-const (
+	ILNAMIQUI_DIR       = ".ilnamiqui"
+	ILNAMIQUI_DB        = "ilnamiqui.db"
+	SENTINEL_FILE       = ".initialized"
 	LEGACY_OPENCODE_DIR = ".opencode"
 	LEGACY_DB_NAME      = "ilnamiqui.db"
 )
